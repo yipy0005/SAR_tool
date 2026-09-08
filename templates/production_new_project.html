@@ -1,0 +1,27 @@
+{% extends "production_workspace_base.html" %}
+{% block content %}
+<section class="panel production-new-project" aria-labelledby="newProjectHeading">
+  <div class="section-kicker">NEW PROJECT · CLEAN DATA BOUNDARY</div>
+  <h2 id="newProjectHeading">Start a blank project</h2>
+  <p class="panel-subtitle">Use a new project when you want a separate set of lab results. Existing projects, uploaded files, calculations, and review items stay unchanged.</p>
+  <p class="chemistry-why"><strong>Why in chemistry</strong>Separate project boundaries prevent compounds, assay conditions, and SAR conclusions from different chemical series or programs being combined accidentally.</p>
+  <div class="production-reading-guide" aria-label="What a new project does">
+    <div><strong>New blank workspace</strong><span>Starts with no compounds or results.</span></div>
+    <div><strong>Existing data stays safe</strong><span>Your current project is not deleted or modified.</span></div>
+    <div><strong>Next step</strong><span>After creation, choose a lab results file.</span></div>
+  </div>
+  {% if project_error %}<div class="production-new-project__error" role="alert">{{ project_error }}</div>{% endif %}
+  <form class="production-new-project__form" method="post" action="{{ url_for('production_new_project') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <label for="productionNewProjectName">Project name</label>
+    <input id="productionNewProjectName" name="name" type="text" value="{{ form_name }}" minlength="2" maxlength="160" required autofocus placeholder="e.g. Kinase series 2026">
+    <label for="productionNewProjectDescription">Description <span class="production-technical-label">optional</span></label>
+    <textarea id="productionNewProjectDescription" name="description" rows="4" maxlength="1000" placeholder="What results will this project contain?">{{ form_description }}</textarea>
+    <div class="production-new-project__actions">
+      <button class="button button--primary" type="submit">Create blank project</button>
+      <a class="button button--secondary" href="{{ url_for('index') }}">Cancel</a>
+    </div>
+    <p class="chemistry-why"><strong>Why in chemistry</strong>A clear project name and scope make it easier to know which chemical series, assays, and source files a later conclusion belongs to.</p>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,5 @@
+compound_id,smiles,assay,result,unit,qualifier,replicate,date
+BAD-001,not-a-valid-smiles,IC50,10,nM,=,1,2026-09-09
+BAD-002,CCO,IC50,NaN,nM,=,1,2026-09-09
+BAD-003,CCN,IC50,10,unknown_unit,=,1,2026-09-09
+BAD-004,CCC,IC50,10,nM,!,1,2026-09-09

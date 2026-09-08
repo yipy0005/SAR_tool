@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign in · SAR Workbench</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <main class="page-content" style="max-width: 520px; margin: 10vh auto 0;">
+      <section class="panel">
+        <div class="panel-header"><div><div class="section-kicker">PRODUCTION ACCESS</div><h1 style="font-size: 30px; margin-top: 8px;">Sign in to SAR Workbench</h1></div></div>
+        <p class="modal-copy">Production data is protected. Demo data is never used as a fallback.</p>
+        {% if error %}<div class="evidence-boundary-box" role="alert"><span>{{ error }}</span></div>{% endif %}
+        <form method="post" action="{{ url_for('login', next=next_path) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <label class="form-label" for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="username" required style="width: calc(100% - 42px); min-height: 44px; padding: 10px;">
+          <label class="form-label" for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required style="width: calc(100% - 42px); min-height: 44px; padding: 10px;">
+          <div class="modal-actions" style="margin-top: 20px;"><button class="button button--primary" type="submit">Sign in</button></div>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

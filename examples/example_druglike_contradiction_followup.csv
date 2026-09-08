@@ -1,0 +1,4 @@
+compound_id,smiles,assay,result,unit,qualifier,replicate,date
+DLG-001,O=C(Nc1ccccn1)Cc1ccccc1,IC50,10000,nM,=,1,2026-09-17
+DLG-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,OffTarget,100,nM,=,1,2026-09-17
+DLG-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,Cellular,4.5,pIC50,=,1,2026-09-17

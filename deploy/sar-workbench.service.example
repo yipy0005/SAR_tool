@@ -1,0 +1,21 @@
+[Unit]
+Description=SAR Workbench scientific SAR service
+After=network.target
+
+[Service]
+Type=simple
+User=sar-workbench
+Group=sar-workbench
+WorkingDirectory=/opt/sar-workbench
+EnvironmentFile=/etc/sar-workbench.env
+ExecStart=/opt/sar-workbench/.pixi/envs/default/bin/gunicorn --config /opt/sar-workbench/deploy/gunicorn.conf.py wsgi:app
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/sar-workbench
+
+[Install]
+WantedBy=multi-user.target

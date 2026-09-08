@@ -1,0 +1,81 @@
+compound_id,smiles,assay,result,unit,qualifier,replicate,date
+DLG-001,O=C(Nc1ccccn1)Cc1ccccc1,IC50,120,nM,=,1,2026-09-10
+DLG-001,O=C(Nc1ccccn1)Cc1ccccc1,IC50,130,nM,=,2,2026-09-11
+DLG-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,IC50,250,nM,=,1,2026-09-10
+DLG-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,IC50,270,nM,=,2,2026-09-11
+DLG-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,IC50,480,nM,=,1,2026-09-10
+DLG-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,IC50,520,nM,=,2,2026-09-11
+DLG-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,IC50,45,nM,=,1,2026-09-10
+DLG-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,IC50,50,nM,=,2,2026-09-11
+DLG-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,IC50,18,nM,=,1,2026-09-10
+DLG-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,IC50,22,nM,=,2,2026-09-11
+DLG-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,IC50,6,nM,=,1,2026-09-10
+DLG-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,IC50,8,nM,=,2,2026-09-11
+DLG-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,IC50,70,nM,=,1,2026-09-10
+DLG-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,IC50,85,nM,=,2,2026-09-11
+DLG-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,IC50,140,nM,=,1,2026-09-10
+DLG-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,IC50,160,nM,=,2,2026-09-11
+DLG-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,IC50,600,nM,=,1,2026-09-10
+DLG-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,IC50,1000,nM,>,2,2026-09-11
+DLG-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,IC50,32,nM,=,1,2026-09-10
+DLG-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,IC50,38,nM,=,2,2026-09-11
+DLG-001,O=C(Nc1ccccn1)Cc1ccccc1,Cellular,6.0,pIC50,=,1,2026-09-12
+DLG-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,Cellular,5.7,pIC50,=,1,2026-09-12
+DLG-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,Cellular,5.3,pIC50,=,1,2026-09-12
+DLG-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,Cellular,6.2,pIC50,=,1,2026-09-12
+DLG-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,Cellular,6.5,pIC50,=,1,2026-09-12
+DLG-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,Cellular,7.0,pIC50,=,1,2026-09-12
+DLG-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,Cellular,6.0,pIC50,=,1,2026-09-12
+DLG-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,Cellular,5.8,pIC50,=,1,2026-09-12
+DLG-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,Cellular,not reported,pIC50,=,1,2026-09-12
+DLG-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,Cellular,6.4,pIC50,=,1,2026-09-12
+DLG-001,O=C(Nc1ccccn1)Cc1ccccc1,OffTarget,4.5,pIC50,=,1,2026-09-13
+DLG-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,OffTarget,4.6,pIC50,=,1,2026-09-13
+DLG-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,OffTarget,4.3,pIC50,=,1,2026-09-13
+DLG-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,OffTarget,4.8,pIC50,=,1,2026-09-13
+DLG-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,OffTarget,5.0,pIC50,=,1,2026-09-13
+DLG-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,OffTarget,5.4,pIC50,=,1,2026-09-13
+DLG-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,OffTarget,4.9,pIC50,=,1,2026-09-13
+DLG-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,OffTarget,5.1,pIC50,=,1,2026-09-13
+DLG-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,OffTarget,4.2,pIC50,=,1,2026-09-13
+DLG-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,OffTarget,4.7,pIC50,=,1,2026-09-13
+DLG-001,O=C(Nc1ccccn1)Cc1ccccc1,CLint,5.2,uL/min/mg,=,1,2026-09-14
+DLG-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,CLint,6.4,uL/min/mg,=,1,2026-09-14
+DLG-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,CLint,9.5,uL/min/mg,=,1,2026-09-14
+DLG-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,CLint,3.0,uL/min/mg,=,1,2026-09-14
+DLG-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,CLint,2.6,uL/min/mg,=,1,2026-09-14
+DLG-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,CLint,1.8,uL/min/mg,=,1,2026-09-14
+DLG-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,CLint,4.2,uL/min/mg,=,1,2026-09-14
+DLG-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,CLint,12.0,uL/min/mg,=,1,2026-09-14
+DLG-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,CLint,not run,uL/min/mg,=,1,2026-09-14
+DLG-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,CLint,3.5,uL/min/mg,=,1,2026-09-14
+DLG-001,O=C(Nc1ccccn1)Cc1ccccc1,Papp,12,10^-6 cm/s,=,1,2026-09-14
+DLG-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,Papp,10,10^-6 cm/s,=,1,2026-09-14
+DLG-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,Papp,6,10^-6 cm/s,=,1,2026-09-14
+DLG-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,Papp,18,10^-6 cm/s,=,1,2026-09-14
+DLG-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,Papp,22,10^-6 cm/s,=,1,2026-09-14
+DLG-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,Papp,28,10^-6 cm/s,=,1,2026-09-14
+DLG-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,Papp,14,10^-6 cm/s,=,1,2026-09-14
+DLG-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,Papp,4,10^-6 cm/s,=,1,2026-09-14
+DLG-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,Papp,2,10^-6 cm/s,=,1,2026-09-14
+DLG-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,Papp,16,10^-6 cm/s,=,1,2026-09-14
+DLG-001,O=C(Nc1ccccn1)Cc1ccccc1,Solubility,75,µM,=,1,2026-09-15
+DLG-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,Solubility,62,µM,=,1,2026-09-15
+DLG-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,Solubility,35,µM,=,1,2026-09-15
+DLG-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,Solubility,110,µM,=,1,2026-09-15
+DLG-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,Solubility,88,µM,=,1,2026-09-15
+DLG-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,Solubility,25,µM,=,1,2026-09-15
+DLG-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,Solubility,55,µM,=,1,2026-09-15
+DLG-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,Solubility,20,µM,=,1,2026-09-15
+DLG-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,Solubility,8,µM,=,1,2026-09-15
+DLG-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,Solubility,150,µM,>,1,2026-09-15
+DLG-001,O=C(Nc1ccccn1)Cc1ccccc1,CYP3A4,1.4,µM,=,1,2026-09-15
+DLG-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,CYP3A4,1.2,µM,=,1,2026-09-15
+DLG-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,CYP3A4,0.9,µM,=,1,2026-09-15
+DLG-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,CYP3A4,1.8,µM,=,1,2026-09-15
+DLG-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,CYP3A4,2.1,µM,=,1,2026-09-15
+DLG-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,CYP3A4,3.5,µM,=,1,2026-09-15
+DLG-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,CYP3A4,1.0,µM,=,1,2026-09-15
+DLG-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,CYP3A4,not run,µM,=,1,2026-09-15
+DLG-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,CYP3A4,0.4,µM,=,1,2026-09-15
+DLG-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,CYP3A4,1.5,µM,=,1,2026-09-15

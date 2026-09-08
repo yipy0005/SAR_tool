@@ -1,0 +1,67 @@
+{% extends "production_workspace_base.html" %}
+{% block content %}
+{% if project %}
+{% set has_committed_data = counts.measurements > 0 %}
+{% if not has_committed_data %}
+<section class="panel production-start-here" aria-labelledby="productionStartHeading">
+  <div class="production-start-here__copy">
+    <div class="section-kicker">START HERE · STEP 1</div>
+    <h2 id="productionStartHeading">Start with one lab results file</h2>
+    <p class="panel-subtitle">Choose the file your lab system exported. We will check what it contains before anything is saved to the project.</p>
+    <p class="chemistry-why"><strong>Why in chemistry</strong>Starting from the raw export preserves compound identity, assay context, and measured values before we ask whether a structural change relates to activity.</p>
+    <div class="production-start-here__sequence" aria-label="First-run sequence">
+      <span><strong>1</strong> Choose a file</span>
+      <span><strong>2</strong> Check the rows</span>
+      <span><strong>3</strong> Save accepted results</span>
+    </div>
+  </div>
+  <div class="production-start-here__action">
+    <span class="status-badge status-badge--neutral">No results saved yet</span>
+    <a class="button button--primary" href="#production-import">Choose a file <span aria-hidden="true">↓</span></a>
+  </div>
+</section>
+{% include "production_actions.html" %}
+<section class="production-next-step-panel" aria-labelledby="firstRunNextHeading">
+  <div class="section-kicker">WHAT HAPPENS NEXT</div>
+  <h2 id="firstRunNextHeading">You stay in control of what gets saved</h2>
+  <p>Chemistry decisions need a chain from measured value to interpretation. These steps keep that chain visible.</p>
+  <p class="chemistry-why"><strong>Why in chemistry</strong>Saving only reviewed rows prevents a typo, wrong unit, or unresolved structure identity from becoming a false structure–activity signal.</p>
+  <div class="production-next-step-panel__steps">
+    <div><strong>1</strong><span><b>Check results</b>See which rows are ready and which need attention.</span></div>
+    <div><strong>2</strong><span><b>Compare</b>Put compatible tests side by side.</span></div>
+    <div><strong>3</strong><span><b>Find patterns</b>Use calculated views to plan the next question.</span></div>
+  </div>
+</section>
+{% else %}
+<section class="metric-grid production-overview-metrics">
+  <article class="metric-card"><div class="metric-label">Chemicals <span class="production-technical-label">compounds</span></div><div class="metric-main"><strong>{{ counts.compounds }}</strong></div><div class="metric-sub">Validated identities let structural changes be compared without mixing compounds.</div></article>
+  <article class="metric-card"><div class="metric-label">Uploaded results <span class="production-technical-label">raw measurements</span></div><div class="metric-main"><strong>{{ counts.measurements }}</strong></div><div class="metric-sub">Original values keep measured potency and assay context visible.</div></article>
+  <article class="metric-card"><div class="metric-label">Files checked <span class="production-technical-label">source imports</span></div><div class="metric-main"><strong>{{ counts.imports }}</strong></div><div class="metric-sub">Source history lets each SAR observation be traced back to a lab file.</div></article>
+  <article class="metric-card metric-card--quality"><div class="metric-label">Calculated summaries <span class="production-technical-label">derived summaries</span></div><div class="metric-main"><strong>{{ counts.measurement_summaries }}</strong></div><div class="metric-sub">Grouping repeats prevents noisy measurements from being mistaken for separate signals.</div></article>
+  <article class="metric-card metric-card--quality"><div class="metric-label">Pattern checks <span class="production-technical-label">analysis runs</span></div><div class="metric-main"><strong>{{ counts.analysis_runs }}</strong></div><div class="metric-sub">Versioned views make structure–activity signals reproducible and reviewable.</div></article>
+  <article class="metric-card metric-card--quality"><div class="metric-label">Reviewable designs <span class="production-technical-label">curated designs</span></div><div class="metric-main"><strong>{{ counts.design_candidates }}</strong></div><div class="metric-sub">Ideas stay separate from measured chemistry until an experiment tests them.</div></article>
+</section>
+{% include "production_actions.html" %}
+<script id="productionVisualData" type="application/json">{{ {"compounds": compounds, "measurements": measurements, "summaries": measurement_summaries, "rgroupAssignments": rgroup_assignments, "scaffoldSvg": scaffold_svg, "selectivity": selectivity_observations, "translation": translation_observations, "adme": adme_observations, "properties": property_profiles}|tojson }}</script>
+<section class="panel production-overview-sar">
+  <div class="panel-header">
+    <div><div class="section-kicker">SAR SNAPSHOT · CALCULATED VIEW</div><h2>Structure → activity → next question</h2><p class="panel-subtitle">A compact read of saved results. Use Compare or Find patterns for the details.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Looking from structure to measured response helps identify plausible relationships, while the linked evidence keeps correlation from being mistaken for cause.</p></div>
+    <a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='explore', project_id=project.id) }}">Open Compare</a>
+  </div>
+  <div id="productionSarDiagram" class="production-sar-diagram" aria-live="polite"></div>
+</section>
+<section class="production-overview-workspaces" aria-label="Workflow pages">
+  <a class="production-overview-workspace-card" href="{{ url_for('production_workspace', view='evidence', project_id=project.id) }}"><span class="section-kicker">02 · CHECK RESULTS</span><h2>See what was uploaded</h2><p>Check structures, values, units, missing results, warnings, and where each result came from.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Identity and source checks decide whether a value can support a chemical conclusion.</p><strong>Open Check results →</strong></a>
+  <a class="production-overview-workspace-card" href="{{ url_for('production_workspace', view='explore', project_id=project.id) }}"><span class="section-kicker">03 · COMPARE</span><h2>Compare tests side by side</h2><p>Choose a test, narrow the compounds, and inspect differences without losing the source values.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Side-by-side tests can reveal selectivity, cell-context effects, or assay-specific behavior.</p><strong>Open Compare →</strong></a>
+  <a class="production-overview-workspace-card" href="{{ url_for('production_workspace', view='analysis', project_id=project.id) }}"><span class="section-kicker">04 · FIND PATTERNS</span><h2>Look for useful signals</h2><p>Review calculated structure, response, selectivity, cell, property, and conflict views.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Calculated views help prioritize which structural differences deserve a closer medicinal-chemistry question.</p><strong>Open Find patterns →</strong></a>
+  <a class="production-overview-workspace-card" href="{{ url_for('production_workspace', view='designs', project_id=project.id) }}"><span class="section-kicker">05 · CHOOSE NEXT</span><h2>Turn gaps into questions</h2><p>Keep observations, suggestions, hypotheses, and untested design candidates clearly separate.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Separating evidence from proposed molecules keeps the next synthesis or assay tied to an explicit uncertainty.</p><strong>Open Choose next →</strong></a>
+</section>
+<section class="panel production-overview-map">
+  <div class="panel-header"><div><div class="section-kicker">STRUCTURE-FIRST SNAPSHOT</div><h2>Chemical map</h2><p class="panel-subtitle">Scan validated structures without opening the full evidence audit.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Seeing the scaffold and substituents together makes obvious structural clusters or outliers easier to inspect before reading activity trends.</p></div><a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='evidence', project_id=project.id) }}">Open Check results</a></div>
+  <div id="productionCompoundGrid" class="production-compound-grid" aria-live="polite"></div>
+</section>
+{% endif %}
+{% else %}
+<section class="panel"><div class="empty-state"><svg class="icon icon--large" aria-hidden="true"><use href="#i-flask"></use></svg><strong>No production project exists yet.</strong><span>Create a project through <code>POST /api/v1/projects</code>, then open this Start page again.</span></div></section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "production_workspace_base.html" %}
+{% block content %}
+{% if project %}
+<section class="production-page-heading"><div><div class="section-kicker">CHOOSE NEXT · REVIEW QUEUE</div><h2>Choose the next question to test</h2><p class="panel-subtitle">Review the evidence first, then decide whether a suggested question, a written hypothesis, or a design candidate is useful. Every item here remains untested.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Medicinal-chemistry decisions are safer when the proposed molecule or assay change answers a named uncertainty instead of following a pattern blindly.</p></div><div class="page-actions"><a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='analysis', project_id=project.id) }}">Open Find patterns</a><a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='explore', project_id=project.id) }}">Open Compare</a></div></section>
+<section class="production-reading-guide" aria-label="How to read Choose next">
+  <div><strong>Suggested question</strong><span>A computer-generated prompt about an evidence gap.</span><em>Review its cited results; it is not a recommendation to accept automatically.</em></div>
+  <div><strong>Hypothesis</strong><span>A human-written statement that can be tested.</span><em>It records an idea, not a confirmed explanation.</em></div>
+  <div><strong>Design candidate</strong><span>A proposed experiment or chemical design for review.</span><em>It is not an experimental result and cannot be marked confirmed here.</em></div>
+</section>
+<section class="panel design-review-panel" id="productionRecommendations">
+  <div class="panel-header"><div><div class="section-kicker">01 · SUGGESTED QUESTIONS <span class="production-technical-label">generated evidence gaps</span> <span class="status-badge status-badge--warn">review required</span></div><h2>Suggested questions to review</h2><p class="panel-subtitle">These prompts are generated from saved heuristic observations. Open their cited evidence before deciding whether a question is worth testing.</p><p class="chemistry-why"><strong>Why in chemistry</strong>An evidence gap can identify what to measure next, but a chemist must decide whether the missing context is relevant to mechanism, exposure, selectivity, or synthesis.</p></div></div>
+  {% for recommendation in recommendations %}<article class="design-review-item"><strong>{{ recommendation.title }}</strong><span>{{ recommendation.status }}</span><p>{{ recommendation.rationale }}</p><small>Based on uploaded or calculated evidence: <code>{{ recommendation.evidence_ids | join(', ') }}</code></small></article>{% else %}<div class="empty-state">No suggested questions are awaiting review.</div>{% endfor %}
+</section>
+<section class="panel design-review-panel">
+  <div class="panel-header"><div><div class="section-kicker">02 · QUESTIONS <span class="production-technical-label">hypotheses</span> <span class="status-badge status-badge--warn">untested</span></div><h2>Questions already being tracked</h2><p class="panel-subtitle">These are statements recorded by people in the project. They remain open questions until a future experiment tests them.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Writing the expected structural or biological relationship down makes the next assay capable of supporting or challenging the idea.</p></div></div>
+  <div class="matrix-wrap"><table class="evidence-table"><thead><tr><th>Question</th><th>Why it was raised</th><th>Status</th><th>Created</th></tr></thead><tbody>{% for item in hypotheses %}<tr><td>{{ item.statement }}</td><td>{{ item.rationale or '—' }}</td><td>{{ item.status }}</td><td>{{ item.created_at }}</td></tr>{% else %}<tr><td colspan="4">No questions have been saved yet.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+<section class="panel design-review-panel">
+  <div class="panel-header"><div><div class="section-kicker">03 · PROPOSED EXPERIMENTS <span class="production-technical-label">CURATED DESIGN QUEUE</span> <span class="status-badge status-badge--warn">untested</span></div><h2>Design candidates ready for review</h2><p class="panel-subtitle">These curated candidates are still untested. Check the supporting evidence, feasibility, ranking components, and uncertainty before treating one as a next experiment.</p><p class="chemistry-why"><strong>Why in chemistry</strong>A candidate is useful only when its proposed change, synthetic or assay feasibility, expected outcome, and failure mode are explicit.</p></div></div>
+  <div class="matrix-wrap"><table class="evidence-table"><thead><tr><th>Rank</th><th>Candidate</th><th>Purpose</th><th>Feasibility</th><th>Score</th><th>Uncertainty</th><th>Evidence</th></tr></thead><tbody>{% for candidate in design_candidates %}<tr><td><strong>{{ candidate.rank or loop.index }}</strong></td><td>{{ candidate.title }}</td><td>{{ candidate.category }}</td><td>{{ candidate.feasibility_status }}</td><td>{{ candidate.ranking_score }}</td><td>{{ candidate.uncertainty }}</td><td><code>{{ candidate.evidence_ids | join(', ') }}</code></td></tr>{% else %}<tr><td colspan="7">No proposed experiment has been saved yet.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+<section class="design-create-section" aria-labelledby="designCreateHeading">
+  <div class="production-page-heading"><div><div class="section-kicker">04 · CREATE AFTER REVIEW</div><h2 id="designCreateHeading">Add a question or proposed experiment</h2><p class="panel-subtitle">Both forms are optional. Link each entry to project evidence and state what remains uncertain.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Linking an idea to evidence makes the next molecule or assay condition auditable and helps distinguish a testable question from a confirmed explanation.</p></div></div>
+  <div class="design-workflow-grid">
+    <form id="productionHypothesisForm" class="panel design-workflow-card">
+      <div class="section-kicker">OPTIONAL QUESTION <span class="production-technical-label">hypothesis</span></div><h2>Write a testable question</h2><p class="panel-subtitle">State what you think may be true and why the current evidence makes it worth checking.</p><p class="chemistry-why"><strong>Why in chemistry</strong>A clear hypothesis connects a structural change or assay context to an expected response, so the next experiment can be discriminating.</p>
+      <label for="productionHypothesisStatement">Question or statement</label><input id="productionHypothesisStatement" name="statement" minlength="8" required placeholder="A change may…">
+      <label for="productionHypothesisRationale">Why ask this?</label><textarea id="productionHypothesisRationale" name="rationale" rows="5" placeholder="Cite the evidence and uncertainty."></textarea>
+      <button class="button button--primary button--small" type="submit">Save question</button><div id="productionHypothesisStatus" class="production-design-status" role="status" aria-live="polite"></div>
+    </form>
+    <form id="productionDesignForm" class="panel design-workflow-card">
+      <div class="section-kicker">OPTIONAL PROPOSED EXPERIMENT <span class="production-technical-label">design candidate</span></div><h2>Describe a candidate for review</h2><p class="panel-subtitle">Record what could be tested, what result you expect, and what could make the idea wrong. It remains untested.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Capturing the parent compound, purpose, expected result, and uncertainty makes a proposed analogue or assay change reviewable before resources are committed.</p>
+      <div class="production-explorer-form-grid"><label>Purpose<select name="category"><option value="exploit">Build on a useful signal</option><option value="test">Test a question</option><option value="resolve">Resolve a conflict</option><option value="fill">Fill an evidence gap</option><option value="explore">Explore a new direction</option></select></label><label>Feasibility<select name="feasibility_status"><option value="unreviewed">Not reviewed</option><option value="tractable">Looks feasible</option><option value="review">Needs review</option></select></label></div>
+      <label>Parent compound<select name="parent_compound_id"><option value="">No parent selected</option>{% for compound in compounds %}<option value="{{ compound.id }}">{{ compound.registration_id }}</option>{% endfor %}</select></label>
+      <label>Title<input name="title" minlength="8" required placeholder="Test a supported change"></label>
+      <label>Evidence for it<textarea name="rationale" rows="2" minlength="8" required placeholder="What saved result supports this idea?"></textarea></label>
+      <label>Question it tests<textarea name="hypothesis" rows="2" minlength="8" required placeholder="What remains untested?"></textarea></label>
+      <label>Expected outcome<textarea name="expected_outcome" rows="2" minlength="8" required placeholder="What would this clarify?"></textarea></label>
+      <label>Uncertainty<textarea name="uncertainty" rows="2" minlength="8" required placeholder="What could make this wrong?"></textarea></label>
+      <label>Evidence IDs<input name="evidence_ids" required placeholder="measurement_id, summary_id, analysis_id"></label>
+      <label>Structure SMILES <em>optional</em><input name="structure_smiles" placeholder="Leave blank when not designed"></label>
+      <button class="button button--primary button--small" type="submit">Save proposed experiment</button><div id="productionDesignStatus" class="production-design-status" role="status" aria-live="polite"></div>
+    </form>
+  </div>
+</section>
+{% else %}
+<section class="panel"><div class="empty-state"><strong>No project selected.</strong><span>Return to Start after creating a production project.</span></div></section>
+{% endif %}
+{% endblock %}

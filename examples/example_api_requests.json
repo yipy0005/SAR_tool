@@ -1,0 +1,97 @@
+{
+  "project_name": "Synthetic SAR full-workflow example",
+  "analysis_requests": {
+    "mmp": {},
+    "rgroup": {
+      "scaffold_smarts": "c1ccccc1"
+    },
+    "activity_cliffs": {
+      "effect_threshold": 0.5
+    },
+    "properties": {},
+    "selectivity": {
+      "primary_compatibility_key": "IC50:import-v1",
+      "comparator_compatibility_key": "OffTarget:import-v1",
+      "selectivity_threshold": 1.0
+    },
+    "cellular_translation": {
+      "biochemical_compatibility_key": "IC50:import-v1",
+      "cellular_compatibility_key": "Cellular:import-v1",
+      "translation_loss_threshold": 1.0
+    },
+    "adme": {
+      "compatibility_keys": [
+        "CLint:import-v1",
+        "Papp:import-v1",
+        "Solubility:import-v1",
+        "CYP3A4:import-v1"
+      ]
+    },
+    "pareto": {
+      "objectives": [
+        {
+          "source": "summary",
+          "key": "IC50:import-v1",
+          "direction": "maximize",
+          "label": "Observed biochemical potency"
+        },
+        {
+          "source": "property",
+          "key": "logp",
+          "direction": "minimize",
+          "label": "Derived logP"
+        }
+      ]
+    },
+    "contradictions": {
+      "value_tolerance": 0.5
+    },
+    "information_gain": {
+      "contexts": [
+        {
+          "compatibility_key": "Cellular:import-v1",
+          "priority": 1.0,
+          "minimum_replicates": 2
+        },
+        {
+          "compatibility_key": "CYP3A4:import-v1",
+          "priority": 0.7,
+          "minimum_replicates": 2
+        }
+      ]
+    }
+  },
+  "generated_recommendation_request": {
+    "project_id": "REPLACE_WITH_PROJECT_ID",
+    "information_gain_run_id": "REPLACE_WITH_INFORMATION_GAIN_RUN_ID",
+    "limit": 10
+  },
+  "generated_recommendation_review_request": {
+    "status": "approved",
+    "review_note": "Reviewed against the synthetic evidence and approved for test execution."
+  },
+  "curated_design_request": {
+    "project_id": "REPLACE_WITH_PROJECT_ID",
+    "candidates": [
+      {
+        "category": "test",
+        "title": "Test a supported aromatic potency direction",
+        "rationale": "The candidate is tied to persisted synthetic potency evidence.",
+        "hypothesis": "A modest aromatic substitution preserves potency while changing exposure.",
+        "expected_outcome": "The next assay will distinguish potency from exposure effects.",
+        "uncertainty": "The proposed structure has not been experimentally measured.",
+        "evidence_ids": ["REPLACE_WITH_SUMMARY_ID"],
+        "novelty_score": 0.45,
+        "feasibility_status": "tractable",
+        "feasibility_reasons": ["Uses a simple aromatic substitution"],
+        "information_gain_score": 0.8,
+        "objective_alignment_score": 0.75,
+        "parent_compound_id": "REPLACE_WITH_COMPOUND_UUID",
+        "structure_smiles": "Cc1ccccc1"
+      }
+    ]
+  },
+  "export_request": {
+    "format": "json"
+  }
+}

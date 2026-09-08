@@ -1,0 +1,7 @@
+instance/
+.pixi/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.log
+.kiro/
