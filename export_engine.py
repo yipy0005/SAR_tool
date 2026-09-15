@@ -136,8 +136,40 @@ def build_project_export(
             "SELECT * FROM generated_recommendations WHERE project_id = ? ORDER BY information_gain_score DESC, created_at, id",
             (project_id,),
         ))
+        series = _dict_rows(connection.execute(
+            "SELECT * FROM series WHERE project_id = ? ORDER BY name, id",
+            (project_id,),
+        ))
+        series_versions = _dict_rows(connection.execute(
+            """
+            SELECT sv.*, s.project_id, s.name AS series_name
+            FROM series_versions sv
+            JOIN series s ON s.id = sv.series_id
+            WHERE s.project_id = ?
+            ORDER BY s.name, sv.version
+            """,
+            (project_id,),
+        ))
+        series_memberships = _dict_rows(connection.execute(
+            """
+            SELECT sm.*, sv.series_id, sv.version AS series_version,
+                   s.project_id, s.name AS series_name,
+                   c.registration_id
+            FROM series_memberships sm
+            JOIN series_versions sv ON sv.id = sm.series_version_id
+            JOIN series s ON s.id = sv.series_id
+            JOIN compounds c ON c.id = sm.compound_id
+            WHERE s.project_id = ?
+            ORDER BY s.name, sv.version, c.registration_id
+            """,
+            (project_id,),
+        ))
 
-    row_count = len(compounds) + len(structures) + len(measurements) + len(summaries) + len(analyses) + len(claims) + len(designs) + len(generated)
+    row_count = (
+        len(compounds) + len(structures) + len(measurements) + len(summaries)
+        + len(analyses) + len(claims) + len(designs) + len(generated)
+        + len(series) + len(series_versions) + len(series_memberships)
+    )
     if row_count > max_rows:
         raise ExportError(f"Export exceeds the {max_rows} row safety limit")
 
@@ -167,6 +199,12 @@ def build_project_export(
         item["score_components"] = _json_value(item.pop("score_components_json", None), {})
         item["data_origin"] = "generated"
         item["experimentally_confirmed"] = False
+    for item in series:
+        item["data_origin"] = "curated"
+    for item in series_versions:
+        item["data_origin"] = "curated"
+    for item in series_memberships:
+        item["data_origin"] = "curated"
 
     export_id = _id("export")
     created_at = _now()
@@ -184,6 +222,9 @@ def build_project_export(
         "claims": claims,
         "curated_designs": designs,
         "generated_recommendations": generated,
+        "series": series,
+        "series_versions": series_versions,
+        "series_memberships": series_memberships,
         "row_count": row_count,
         "max_rows": max_rows,
         "data_origin": "production_export",
@@ -191,6 +232,7 @@ def build_project_export(
             "raw_measurements": "raw",
             "summaries_and_analyses": "derived",
             "curated_designs": "curated",
+            "series_and_memberships": "curated",
             "generated_recommendations": "generated_review_or_approved",
             "experimental_confirmation": "not represented by generated recommendations",
         },
@@ -263,6 +305,12 @@ def export_project_csv(bundle: dict[str, Any]) -> str:
         write_record("claim", item)
     for item in bundle["curated_designs"]:
         write_record("curated_design", item)
+    for item in bundle["series"]:
+        write_record("series", item)
+    for item in bundle["series_versions"]:
+        write_record("series_version", item)
+    for item in bundle["series_memberships"]:
+        write_record("series_membership", item)
     for item in bundle["generated_recommendations"]:
         write_record("generated_recommendation", item)
     return output.getvalue()

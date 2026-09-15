@@ -126,3 +126,46 @@ def test_setup_local_druglike_series(tmp_path: Path) -> None:
     assert (compound_count, structure_count, measurement_count, summary_count) == (10, 10, 80, 70)
     assert project_name == "Synthetic drug-like SAR series"
     assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+
+
+def test_setup_local_blank_workspace_has_no_synthetic_records(tmp_path: Path) -> None:
+    database_path = tmp_path / "blank.db"
+    upload_dir = tmp_path / "blank-uploads"
+    env_file = tmp_path / "blank.env"
+    environment = os.environ.copy()
+    environment["SAR_SETUP_PASSWORD"] = "test-only-password"
+    command = [
+        sys.executable,
+        str(SETUP_SCRIPT),
+        "--non-interactive",
+        "--no-seed-example",
+        "--email",
+        "scientist@example.org",
+        "--database",
+        str(database_path),
+        "--upload-dir",
+        str(upload_dir),
+        "--env-file",
+        str(env_file),
+        "--project-id",
+        "blank_project",
+        "--port",
+        "5012",
+    ]
+    result = subprocess.run(command, cwd=ROOT, env=environment, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr + result.stdout
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("SELECT name FROM projects WHERE id = 'blank_project'").fetchone()[0] == "Local project"
+        assert connection.execute("SELECT COUNT(*) FROM compounds").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 0
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "INSERT INTO compounds (id, project_id, registration_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            ("compound-1", "blank_project", "CMP-001", "2026-09-16T00:00:00+00:00", "2026-09-16T00:00:00+00:00"),
+        )
+        connection.commit()
+
+    reused = subprocess.run(command, cwd=ROOT, env=environment, capture_output=True, text=True, check=False)
+    assert reused.returncode == 2
+    assert "will not reuse a database" in reused.stderr

@@ -33,13 +33,15 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        environment = os.environ.get("SAR_ENV", "demo").strip().lower()
+        environment = os.environ.get("SAR_ENV", "local").strip().lower()
         demo_mode = _env_bool("SAR_DEMO_MODE", environment == "demo")
+        default_database = PROJECT_ROOT / "instance" / "workbench" / "sar.db"
+        default_upload_dir = PROJECT_ROOT / "instance" / "workbench" / "uploads"
         database_path = os.environ.get(
-            "SAR_DATABASE_PATH", str(PROJECT_ROOT / "instance" / "sar.db")
+            "SAR_DATABASE_PATH", str(default_database)
         )
         upload_dir = os.environ.get(
-            "SAR_UPLOAD_DIR", str(PROJECT_ROOT / "instance" / "uploads")
+            "SAR_UPLOAD_DIR", str(default_upload_dir)
         )
         return cls(
             environment=environment,

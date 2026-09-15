@@ -31,7 +31,6 @@ from authorization import (
 )
 from chemistry import StructureValidationError, render_scaffold_svg, standardize_structure
 
-SCAFFOLD_VIEW_SMILES = "O=C(Nc1ccc([*:2])cn1)Cc1ccc([*:1])cc1"
 from config import Settings
 from database import apply_migrations, database_ready, read_connection, transaction
 from export_engine import ExportError, MAX_EXPORT_ROWS, build_project_export, export_project_csv
@@ -47,6 +46,7 @@ from information_gain_engine import (
     run_information_gain_analysis,
 )
 from property_engine import PropertyAnalysisError, get_property_run, run_property_analysis
+from prediction_engine import PredictionError, PredictionNotFoundError, get_prediction_model, list_prediction_models, predict_compounds, train_prediction_model
 from recommendation_engine import (
     RecommendationValidationError,
     generate_recommendations,
@@ -58,6 +58,8 @@ from recommendation_engine import (
 from observability import configure_logging, initialize_metrics, metrics_snapshot, record_request
 from rgroup_engine import RGroupAnalysisError, run_activity_cliff_analysis, run_rgroup_analysis
 from selectivity_engine import SelectivityAnalysisError, get_selectivity_run, run_selectivity_analysis
+from series_engine import SeriesError, SeriesNotFoundError, create_series, create_series_version, series_context
+from search_engine import SearchValidationError, search_compounds
 from import_pipeline import (
     DuplicateImportError,
     ImportConflictError,
@@ -403,7 +405,7 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             version = _ensure_database(app)
             if not database_ready(app.config["DATABASE_PATH"]):
                 raise RuntimeError("database schema is not ready")
-            return jsonify(status="ready", mode="production", schema_version=version)
+            return jsonify(status="ready", mode=app.config["SAR_ENV"], schema_version=version)
         except Exception:
             app.logger.exception("readiness check failed", extra={"request_id": g.get("request_id")})
             return jsonify(status="not_ready", error="database_unavailable", message="Database is not ready."), 503
@@ -432,6 +434,28 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             data_origin="production",
             analytics_status="not_run",
         )
+
+    @app.get("/api/v1/search/compounds")
+    def search_compounds_api():
+        _ensure_database(app)
+        project_id = str(request.args.get("project_id") or "").strip()
+        project = _get_project(app, project_id)
+        if project is None or not _project_access(app, project_id, "viewer"):
+            return jsonify(error="project_forbidden", message="Viewer access is required for this project."), 403
+        started = time.monotonic()
+        try:
+            result = search_compounds(
+                app.config["DATABASE_PATH"],
+                project_id,
+                request.args.get("q", ""),
+                limit=request.args.get("limit"),
+                offset=request.args.get("offset"),
+            )
+        except SearchValidationError as exc:
+            return jsonify(error="invalid_search", message=str(exc)), 422
+        result["search_ms"] = round((time.monotonic() - started) * 1000, 3)
+        result["data_origin"] = "imported"
+        return jsonify(result)
 
     @app.get("/api/compounds")
     @app.get("/api/v1/compounds")
@@ -543,6 +567,78 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             with read_connection(app.config["DATABASE_PATH"]) as connection:
                 projects = [_row_dict(row) for row in connection.execute("SELECT * FROM projects ORDER BY created_at DESC")]
         return jsonify(projects=projects, data_origin="production")
+
+    @app.get("/api/v1/series")
+    def list_series_api():
+        _ensure_database(app)
+        project_id = str(request.args.get("project_id") or "").strip()
+        project = _get_project(app, project_id)
+        if project is None or not _project_access(app, project_id, "viewer"):
+            return jsonify(error="project_forbidden", message="Viewer access is required for this project."), 403
+        context = series_context(app.config["DATABASE_PATH"], project_id)
+        return jsonify(series=context["series"], compound_series=context["compound_series"], data_origin="curated")
+
+    @app.post("/api/v1/series")
+    def create_series_api():
+        _ensure_database(app)
+        payload = _json_payload()
+        project_id = str(payload.get("project_id") or "").strip()
+        project = _get_project(app, project_id)
+        if project is None or not _project_access(app, project_id, "editor"):
+            return jsonify(error="project_forbidden", message="Editor access is required for this project."), 403
+        try:
+            result = create_series(
+                app.config["DATABASE_PATH"],
+                project_id,
+                payload.get("name"),
+                description=payload.get("description", ""),
+                membership_source=payload.get("membership_source", "curated"),
+                rationale=payload.get("rationale", ""),
+                compound_ids=payload.get("compound_ids", []),
+                membership_status=payload.get("membership_status", "included"),
+                created_by=current_user_id(app.config["DATABASE_PATH"]) if app.config["SAR_ENV"] == "production" else None,
+            )
+        except SeriesError as exc:
+            return jsonify(error="invalid_series", message=str(exc)), 422
+        return jsonify(series=result, data_origin="curated"), 201
+
+    @app.get("/api/v1/series/<series_id>")
+    def get_series_api(series_id: str):
+        _ensure_database(app)
+        project_id = str(request.args.get("project_id") or "").strip()
+        project = _get_project(app, project_id)
+        if project is None or not _project_access(app, project_id, "viewer"):
+            return jsonify(error="project_forbidden", message="Viewer access is required for this project."), 403
+        result = series_context(app.config["DATABASE_PATH"], project_id)
+        series = next((item for item in result["series"] if item["id"] == series_id), None)
+        if series is None:
+            return jsonify(error="series_not_found", message="Series is not available in this project."), 404
+        return jsonify(series=series, data_origin="curated")
+
+    @app.post("/api/v1/series/<series_id>/versions")
+    def create_series_version_api(series_id: str):
+        _ensure_database(app)
+        payload = _json_payload()
+        project_id = str(payload.get("project_id") or "").strip()
+        project = _get_project(app, project_id)
+        if project is None or not _project_access(app, project_id, "editor"):
+            return jsonify(error="project_forbidden", message="Editor access is required for this project."), 403
+        try:
+            result = create_series_version(
+                app.config["DATABASE_PATH"],
+                project_id,
+                series_id,
+                membership_source=payload.get("membership_source", "curated"),
+                rationale=payload.get("rationale", ""),
+                compound_ids=payload.get("compound_ids", []),
+                membership_status=payload.get("membership_status", "included"),
+                created_by=current_user_id(app.config["DATABASE_PATH"]) if app.config["SAR_ENV"] == "production" else None,
+            )
+        except SeriesNotFoundError as exc:
+            return jsonify(error="series_not_found", message=str(exc)), 404
+        except SeriesError as exc:
+            return jsonify(error="invalid_series_version", message=str(exc)), 422
+        return jsonify(series=result, data_origin="curated"), 201
 
     @app.get("/api/v1/projects/<project_id>/members")
     def list_project_members_api(project_id: str):
@@ -1067,6 +1163,76 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             return jsonify(error="analysis_not_found"), 404
         return jsonify(result)
 
+    @app.get("/api/v1/predictions")
+    def list_prediction_models_api():
+        _ensure_database(app)
+        project_id = str(request.args.get("project_id") or "").strip()
+        project = _get_project(app, project_id)
+        if project is None or not _project_access(app, project_id, "viewer"):
+            return jsonify(error="project_forbidden", message="Viewer access is required for this project."), 403
+        return jsonify(models=list_prediction_models(app.config["DATABASE_PATH"], project_id), data_origin="derived")
+
+    @app.post("/api/v1/predictions/train")
+    def train_prediction_model_api():
+        _ensure_database(app)
+        payload = _json_payload()
+        project_id = str(payload.get("project_id") or "").strip()
+        project = _get_project(app, project_id)
+        if project is None or not _project_access(app, project_id, "editor"):
+            return jsonify(error="project_forbidden", message="Editor access is required for this project."), 403
+        holdout = payload.get("holdout_compound_ids")
+        if holdout is not None and not isinstance(holdout, list):
+            return jsonify(error="invalid_holdout", message="holdout_compound_ids must be a list."), 422
+        try:
+            model = train_prediction_model(
+                app.config["DATABASE_PATH"],
+                project_id,
+                payload.get("compatibility_key"),
+                holdout_compound_ids=holdout,
+                neighbors=payload.get("neighbors"),
+                min_similarity=payload.get("min_similarity"),
+                min_neighbors=payload.get("min_neighbors"),
+                min_training_compounds=payload.get("min_training_compounds"),
+                min_validation_compounds=payload.get("min_validation_compounds"),
+                min_coverage=payload.get("min_coverage"),
+                max_mae=payload.get("max_mae"),
+                actor_user_id=current_user_id(app.config["DATABASE_PATH"]) if app.config["SAR_ENV"] == "production" else None,
+            )
+        except PredictionError as exc:
+            return jsonify(error="prediction_training_failed", message=str(exc)), 422
+        return jsonify(model=model, data_origin="derived"), 201
+
+    @app.get("/api/v1/predictions/<model_id>")
+    def get_prediction_model_api(model_id: str):
+        _ensure_database(app)
+        project_id = str(request.args.get("project_id") or "").strip()
+        project = _get_project(app, project_id)
+        if project is None or not _project_access(app, project_id, "viewer"):
+            return jsonify(error="project_forbidden", message="Viewer access is required for this project."), 403
+        model = get_prediction_model(app.config["DATABASE_PATH"], project_id, model_id)
+        if model is None:
+            return jsonify(error="prediction_model_not_found", message="Prediction model is not available in this project."), 404
+        return jsonify(model=model, data_origin="derived")
+
+    @app.post("/api/v1/predictions/<model_id>/predict")
+    def predict_compounds_api(model_id: str):
+        _ensure_database(app)
+        payload = _json_payload()
+        project_id = str(payload.get("project_id") or "").strip()
+        project = _get_project(app, project_id)
+        if project is None or not _project_access(app, project_id, "editor"):
+            return jsonify(error="project_forbidden", message="Editor access is required for this project."), 403
+        compound_ids = payload.get("compound_ids")
+        if not isinstance(compound_ids, list):
+            return jsonify(error="compound_ids_required", message="compound_ids must be a list."), 422
+        try:
+            result = predict_compounds(app.config["DATABASE_PATH"], project_id, model_id, compound_ids)
+        except PredictionNotFoundError as exc:
+            return jsonify(error="prediction_model_not_found", message=str(exc)), 404
+        except PredictionError as exc:
+            return jsonify(error="prediction_blocked", message=str(exc)), 422
+        return jsonify(result)
+
     @app.post("/api/v1/analysis/cellular-translation")
     def create_cellular_translation_analysis_api():
         if app.config["SAR_DEMO_MODE"]:
@@ -1570,20 +1736,37 @@ def _production_measurements(app: Flask, project_id: str) -> list[dict[str, Any]
     with read_connection(app.config["DATABASE_PATH"]) as connection:
         rows = connection.execute(
             """
-            SELECT m.id, c.registration_id, ad.name AS assay_name, m.raw_value_text, m.value_numeric,
+            SELECT m.id, c.id AS compound_id, c.registration_id, ad.name AS assay_name,
+                   ad.endpoint_code, ad.modality, ad.protocol_version,
+                   ar.id AS assay_run_id, ar.run_date, ar.qc_status AS assay_qc_status,
+                   ar.biological_context_json, sd.filename AS source_filename,
+                   sd.sha256 AS source_sha256,
+                   m.raw_value_text, m.value_numeric,
                    m.unit_ucum, m.qualifier, m.lower_bound, m.upper_bound, m.canonical_value,
-                   m.canonical_unit, m.transform_id, m.missing_reason, m.source_row_id, m.created_at
+                   m.canonical_unit, m.transform_id, m.missing_reason, m.source_row_id,
+                   m.well_id, m.qc_status, m.created_at
             FROM measurements m
             JOIN compounds c ON c.id = m.compound_id
             JOIN assay_runs ar ON ar.id = m.assay_run_id
             JOIN assay_definitions ad ON ad.id = ar.assay_definition_id
+            LEFT JOIN source_documents sd ON sd.id = ar.source_document_id
             WHERE c.project_id = ?
             ORDER BY m.created_at DESC
             LIMIT 200
             """,
             (project_id,),
         ).fetchall()
-    return [_row_dict(row) | {"data_origin": "imported"} for row in rows]
+    result = []
+    for row in rows:
+        item = _row_dict(row)
+        item["biological_context"] = json.loads(item.pop("biological_context_json") or "{}")
+        item["source_document"] = {
+            "filename": item.pop("source_filename"),
+            "sha256": item.pop("source_sha256"),
+        }
+        item["data_origin"] = "imported"
+        result.append(item)
+    return result
 
 
 def _production_measurement_summaries(app: Flask, project_id: str) -> list[dict[str, Any]]:
@@ -1900,15 +2083,24 @@ def _production_page_context(app: Flask, project: dict[str, Any] | None) -> dict
             "design_candidates": [],
             "hypotheses": [],
             "recommendations": [],
+            "series_context": {"series": [], "compound_series": {}, "data_origin": "curated"},
+            "prediction_models": [],
         }
     project_id = project["id"]
+    rgroup_assignments = _production_rgroup_assignments(app, project_id)
+    scaffold_svg = ""
+    if rgroup_assignments and rgroup_assignments[0].get("scaffold_smarts"):
+        try:
+            scaffold_svg = render_scaffold_svg(rgroup_assignments[0]["scaffold_smarts"])
+        except StructureValidationError:
+            scaffold_svg = ""
     return {
         "project": project,
         "counts": _production_counts(app, project_id),
         "compounds": _production_compounds(app, project_id),
         "measurements": _production_measurements(app, project_id),
         "measurement_summaries": _production_measurement_summaries(app, project_id),
-        "rgroup_assignments": _production_rgroup_assignments(app, project_id),
+        "rgroup_assignments": rgroup_assignments,
         "activity_cliffs": _production_activity_cliffs(app, project_id),
         "mmp_run": _production_mmp(app, project_id),
         "selectivity_observations": _production_selectivity(app, project_id),
@@ -1917,10 +2109,12 @@ def _production_page_context(app: Flask, project: dict[str, Any] | None) -> dict
         "pareto_observations": _production_pareto_observations(app, project_id),
         "contradiction_observations": _production_contradictions(app, project_id),
         "property_profiles": _production_property_profiles(app, project_id),
-        "scaffold_svg": render_scaffold_svg(SCAFFOLD_VIEW_SMILES),
+        "scaffold_svg": scaffold_svg,
         "design_candidates": _production_design_candidates(app, project_id),
         "hypotheses": _production_hypotheses(app, project_id),
         "recommendations": list_generated_recommendations(app.config["DATABASE_PATH"], project_id),
+        "series_context": series_context(app.config["DATABASE_PATH"], project_id),
+        "prediction_models": list_prediction_models(app.config["DATABASE_PATH"], project_id),
     }
 
 

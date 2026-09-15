@@ -53,18 +53,20 @@
     const qualifier = measurement.qualifier && measurement.qualifier !== "=" ? `${measurement.qualifier} ` : "";
     return `${qualifier}${measurement.raw_value_text} ${measurement.unit_ucum || ""}`.trim();
   };
-  const seriesLabel = (compound) => ({
-    "DLG-001": "R¹ = H",
-    "DLG-002": "R¹ = CH₃",
-    "DLG-003": "R¹ = OCH₃",
-    "DLG-004": "R¹ = F",
-    "DLG-005": "R¹ = Cl",
-    "DLG-006": "R¹ = CF₃",
-    "DLG-007": "heteroaryl variant",
-    "DLG-008": "N-methyl amide",
-    "DLG-009": "extended linker",
-    "DLG-010": "morpholine variant",
-  })[compound.registration_id] || "series analogue";
+  const series = Array.isArray(data.series) ? data.series : [];
+  const compoundSeries = data.compoundSeries && typeof data.compoundSeries === "object" ? data.compoundSeries : {};
+  const membershipsFor = (compound) => Array.isArray(compoundSeries[compound.id]) ? compoundSeries[compound.id] : [];
+  const seriesLabel = (compound) => {
+    const memberships = membershipsFor(compound);
+    if (!memberships.length) return "Unassigned · review series context";
+    return memberships.map((membership) => {
+      const state = membership.membership_status === "needs_review" ? " · needs review" : "";
+      return `${membership.series_name}${state}`;
+    }).join(" · ");
+  };
+  const seriesMemberRationale = (compound) => membershipsFor(compound)
+    .map((membership) => membership.rationale)
+    .find((rationale) => rationale) || "Membership rationale not recorded";
   const potencyBar = (summary) => {
     const value = numericValue(summary);
     if (value === null || summary?.summary_state !== "observed") return "<span class=\"compound-signal__bar compound-signal__bar--empty\"></span>";
@@ -119,16 +121,17 @@
     const scaffoldSvg = typeof data.scaffoldSvg === "string" && data.scaffoldSvg.trim().startsWith("<svg")
       ? data.scaffoldSvg
       : leadSvg;
-    const scaffoldSeriesIds = ["DLG-001", "DLG-002", "DLG-003", "DLG-004", "DLG-005", "DLG-006"];
-    const scaffoldCore = scaffoldSeriesIds
-      .map((registrationId) => ranked.find(({ compound }) => compound.registration_id === registrationId))
-      .filter(Boolean);
-    const scaffoldExtensionIds = ordered
-      .filter((compound) => !scaffoldSeriesIds.includes(compound.registration_id))
-      .map((compound) => compound.registration_id);
-    const scaffoldExtensions = scaffoldExtensionIds
-      .map((registrationId) => ranked.find(({ compound }) => compound.registration_id === registrationId))
-      .filter(Boolean);
+    const primarySeries = series
+      .filter((item) => Array.isArray(item.members) && item.members.length > 0)
+      .sort((left, right) => (right.member_count || 0) - (left.member_count || 0))[0];
+    const scaffoldMemberIds = new Set((primarySeries?.members || [])
+      .filter((member) => member.membership_status !== "excluded")
+      .map((member) => member.compound_id));
+    const scaffoldCore = ordered
+      .map((compound) => ranked.find(({ compound: rankedCompound }) => rankedCompound.id === compound.id))
+      .filter((entry) => entry && scaffoldMemberIds.has(entry.compound.id));
+    const scaffoldExtensions = ranked
+      .filter(({ compound }) => !scaffoldMemberIds.has(compound.id));
     const potencyText = ({ compound, summary }) => {
       const value = numericValue(summary);
       const unit = summary?.unit || summary?.canonical_unit || "nM";
@@ -140,45 +143,19 @@
     };
 
     if (scaffoldCore.length >= 4) {
-      const reference = scaffoldCore.find(({ compound }) => compound.registration_id === "DLG-001") || scaffoldCore[0];
+      const reference = scaffoldCore[0];
       const coreValues = scaffoldCore.map(({ value }) => value).filter((value) => value !== null);
       const coreRange = coreValues.length
         ? `${formatValue(Math.min(...coreValues))}–${formatValue(Math.max(...coreValues))} nM`
         : "not available";
-      const r3Variant = scaffoldExtensions.find(({ compound }) => compound.registration_id === "DLG-007");
-      const amideVariant = scaffoldExtensions.find(({ compound }) => compound.registration_id === "DLG-008");
-      const linkerVariant = scaffoldExtensions.find(({ compound }) => compound.registration_id === "DLG-009");
       const scaffoldPositions = {
-        r1: { label: "R1", tone: "blue", title: "Aryl substitution" },
-        linker: { label: "R2", tone: "violet", title: "Linker / spacing" },
-        r3: { label: "R3", tone: "green", title: "Heteroaryl position" },
-        amide: { label: "CORE", tone: "red", title: "Amide connector" },
+        r1: { label: "MEMBERS", tone: "blue", title: "Series membership" },
+        linker: { label: "REVIEW", tone: "violet", title: "Membership rationale" },
+        r3: { label: "EVIDENCE", tone: "green", title: "Evidence state" },
+        amide: { label: "CORE", tone: "red", title: "Shared context" },
       };
-      const scaffoldPositionFor = (registrationId) => ({
-        "DLG-001": "r1",
-        "DLG-002": "r1",
-        "DLG-003": "r1",
-        "DLG-004": "r1",
-        "DLG-005": "r1",
-        "DLG-006": "r1",
-        "DLG-007": "r3",
-        "DLG-008": "amide",
-        "DLG-009": "linker",
-        "DLG-010": "r1",
-      })[registrationId] || "r1";
-      const scaffoldExtensionLabel = (compound) => {
-        const position = scaffoldPositions[scaffoldPositionFor(compound.registration_id)];
-        const labels = {
-          "DLG-007": `${position.label} variant`,
-          "DLG-008": "Amide variant",
-          "DLG-009": `${position.label} extended linker`,
-          "DLG-010": `${position.label} morpholine variant`,
-        };
-        return labels[compound.registration_id] || `${position.label} variant`;
-      };
-      const assignedRgroupCount = Array.isArray(data.rgroupAssignments)
-        ? data.rgroupAssignments.filter((assignment) => assignment.status === "assigned").length
-        : 0;
+      const scaffoldPositionFor = () => "r1";
+      const scaffoldExtensionLabel = (compound) => `${seriesLabel(compound)} · ${seriesMemberRationale(compound)}`;
       const scaffoldCallout = (positionKey, lines) => {
         const position = scaffoldPositions[positionKey];
         return `
@@ -189,58 +166,58 @@
           </article>`;
       };
       const coreCards = scaffoldCore.map(({ compound, summary }) => {
-        const r1 = seriesLabel(compound).replace(/^R[¹1]\s*=\s*/, "");
-        const shortId = compound.registration_id.replace(/^DLG-0*/, "");
+        const memberLabel = seriesLabel(compound);
         return `
-          <article class="production-scaffold-series-card production-scaffold-series-card--r1" data-scaffold-position="R1" aria-label="Core analogue ${escapeHtml(compound.registration_id)} at R1">
+          <article class="production-scaffold-series-card production-scaffold-series-card--r1" data-scaffold-position="MEMBERS" aria-label="Series member ${escapeHtml(compound.registration_id)}">
             <div class="production-scaffold-series__structure structure-hover-target" data-structure-name="${escapeHtml(compound.registration_id)}">${structureHtml(compound)}</div>
-            <strong>${escapeHtml(shortId)}</strong>
-            <span>R1 = ${escapeHtml(r1)}</span>
-            <small>IC<sub>50</sub> ${escapeHtml(potencyText({ compound, summary }))}</small>
+            <strong>${escapeHtml(compound.registration_id)}</strong>
+            <span>${escapeHtml(memberLabel)}</span>
+            <small title="${escapeHtml(seriesMemberRationale(compound))}">IC<sub>50</sub> ${escapeHtml(potencyText({ compound, summary }))}</small>
           </article>`;
       }).join("");
       const extensionCards = scaffoldExtensions.map(({ compound, summary }) => {
         const positionKey = scaffoldPositionFor(compound.registration_id);
         const position = scaffoldPositions[positionKey];
         return `
-          <article class="production-scaffold-extension-card production-scaffold-extension-card--${positionKey}" data-scaffold-position="${escapeHtml(position.label)}" aria-label="Series extension ${escapeHtml(compound.registration_id)} at ${escapeHtml(position.label)}">
+          <article class="production-scaffold-extension-card production-scaffold-extension-card--${positionKey}" data-scaffold-position="${escapeHtml(position.label)}" aria-label="Project compound ${escapeHtml(compound.registration_id)} outside the current series">
             <div class="production-scaffold-extension__structure structure-hover-target" data-structure-name="${escapeHtml(compound.registration_id)}">${structureHtml(compound)}</div>
             <strong>${escapeHtml(compound.registration_id)}</strong>
             <span>${escapeHtml(scaffoldExtensionLabel(compound))}</span>
             <small>IC<sub>50</sub> ${escapeHtml(potencyText({ compound, summary }))}</small>
           </article>`;
       }).join("");
-      const referenceId = reference.compound.registration_id.replace(/^DLG-0*/, "");
-      const r1Labels = scaffoldCore.map(({ compound }) => seriesLabel(compound).replace(/^R[¹1]\s*=\s*/, "")).join(" · ");
-      const rgroupNote = assignedRgroupCount
-        ? `Persisted R-group assignments available for ${assignedRgroupCount} compounds.`
-        : "R1/R2/R3 are declared display positions; no persisted assignment result is inferred.";
+      const referenceId = reference.compound.registration_id;
+      const seriesName = primarySeries?.name || "Curated series";
+      const seriesLabels = scaffoldCore.map(({ compound }) => seriesLabel(compound)).join(" · ");
+      const rgroupNote = primarySeries
+        ? `Series version ${primarySeries.current_version} · ${primarySeries.membership_source.replaceAll("_", " ")} · ${primarySeries.version_rationale || "rationale recorded in series context"}.`
+        : "No persisted series membership is available for this project.";
 
       board.innerHTML = `
         <div class="production-scaffold-note">
-          <strong>Scaffold-aware SAR view</strong>
-          <span>Shared amide–methylene–pyridyl presentation · ${escapeHtml(rgroupNote)}</span>
+          <strong>Series-aware SAR view</strong>
+          <span>${escapeHtml(seriesName)} · ${escapeHtml(rgroupNote)}</span>
         </div>
         <div class="production-scaffold-layout">
           ${scaffoldCallout("r1", [
-            `${scaffoldCore.length} core analogues`,
-            `R1 = ${r1Labels}`,
+            `${scaffoldCore.length} included members`,
+            `Series: ${seriesName}`,
             `Observed IC50 range: ${coreRange}`,
           ])}
           ${scaffoldCallout("r3", [
-            "Core: pyridyl ring",
-            r3Variant ? `DLG-007 R3 variant · IC50 ${potencyText(r3Variant)}` : "No separate R3 variant in this dataset",
-            "Observed comparison; causal interpretation requires review",
+            `Version ${primarySeries.current_version} membership`,
+            `${scaffoldCore.length} compounds included in this view`,
+            "Membership is reviewable and does not alter measurements",
           ])}
           ${scaffoldCallout("linker", [
-            "Core: one-carbon methylene spacer",
-            linkerVariant ? `DLG-009 R2 extended linker · IC50 ${potencyText(linkerVariant)}` : "No R2 linker variant in this dataset",
+            `${scaffoldExtensions.length} compounds outside this series`,
+            "Unassigned or excluded compounds stay separate",
             "Censoring and mixed evidence remain visible",
           ])}
           ${scaffoldCallout("amide", [
-            "Core: secondary amide",
-            amideVariant ? `DLG-008 amide variant · IC50 ${potencyText(amideVariant)}` : "No amide variant in this dataset",
-            "Variant is shown as observed evidence, not a mechanistic conclusion",
+            "Shared comparison context",
+            primarySeries.version_rationale || "Series rationale recorded by the project team",
+            "Structural interpretation remains separate from observation",
           ])}
           <div class="production-scaffold-core">
             <span class="production-scaffold-core__eyebrow">REFERENCE STRUCTURE · SHARED CORE</span>
@@ -249,19 +226,19 @@
             </div>
             <strong>Lead compound (${escapeHtml(referenceId)})</strong>
             <span>IC<sub>50</sub> ${escapeHtml(potencyText(reference))}</span>
-            <small>RDKit scaffold with bond-level R1/R2/R3 and amide-region highlights.</small>
+            <small>Reference structure rendered by RDKit; member positions are not inferred without a persisted analysis result.</small>
           </div>
         </div>
         <div class="production-scaffold-series-heading">
-          <span>Core R1 analogue series</span>
-          <small>Same scaffold · six observed R1 substitutions · values remain source-linked</small>
+          <span>${escapeHtml(seriesName)} · current membership</span>
+          <small>Version ${escapeHtml(primarySeries.current_version)} · values remain source-linked · ${escapeHtml(seriesLabels)}</small>
         </div>
         <div class="production-scaffold-series-rail"><div class="production-scaffold-series">${coreCards}</div></div>
         <div class="production-scaffold-potency-arrow"><span>Potency key · lower IC<sub>50</sub> = higher potency</span><i aria-hidden="true"></i></div>
         ${scaffoldExtensions.length ? `
           <div class="production-scaffold-extension-heading">
-            <span>Series extensions</span>
-            <small>Separate position scans · card accents match scaffold regions</small>
+            <span>Other project compounds</span>
+            <small>Not included in the current series version · review membership before interpretation</small>
           </div>
           <div class="production-scaffold-extension-rail"><div class="production-scaffold-extensions">${extensionCards}</div></div>` : ""}`;
       return;

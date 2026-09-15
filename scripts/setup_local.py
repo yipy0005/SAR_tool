@@ -170,7 +170,13 @@ def _read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
-def _ensure_example_project(database_path: str, project_id: str, email: str, project_name: str) -> str:
+def _ensure_example_project(
+    database_path: str,
+    project_id: str,
+    email: str,
+    project_name: str,
+    project_description: str | None = None,
+) -> str:
     user_id = ensure_local_user(database_path, email)
     if not user_id:
         raise RuntimeError(f"Could not create or activate local user {email}")
@@ -190,7 +196,7 @@ def _ensure_example_project(database_path: str, project_id: str, email: str, pro
                 (
                     project_id,
                     project_name,
-                    "Created by the local synthetic example setup.",
+                    project_description or "Created by the local production-shaped setup.",
                     now,
                     now,
                 ),
@@ -332,7 +338,12 @@ def _setup(args: argparse.Namespace) -> tuple[dict[str, str], str]:
         seed_contradiction = bool(args.seed_contradiction)
     else:
         email = args.email or _prompt_email(DEFAULT_EMAIL)
-        dataset = args.dataset or _prompt_dataset(DEFAULT_DATASET)
+        if args.dataset:
+            dataset = args.dataset
+        elif args.seed_example is False:
+            dataset = DEFAULT_DATASET
+        else:
+            dataset = _prompt_dataset(DEFAULT_DATASET)
         seed_example = args.seed_example if args.seed_example is not None else _ask_yes_no(
             "Import the primary synthetic example data?", default=True
         )
@@ -371,13 +382,26 @@ def _setup(args: argparse.Namespace) -> tuple[dict[str, str], str]:
 
     Path(upload_dir).mkdir(parents=True, exist_ok=True)
     schema_version = apply_migrations(database_path)
+    if not seed_example:
+        with read_connection(database_path) as connection:
+            existing_records = connection.execute(
+                "SELECT (SELECT COUNT(*) FROM compounds) + (SELECT COUNT(*) FROM measurements) AS count"
+            ).fetchone()["count"]
+        if int(existing_records) > 0:
+            raise ValueError(
+                "--no-seed-example will not reuse a database that already contains scientific records; "
+                "choose a new --database and --upload-dir path to create a blank workspace."
+            )
+    project_name = fixture_set["project_name"] if seed_example else "Local project"
+    project_description = None if seed_example else "Blank local project for importing real laboratory results."
     user_id = _ensure_example_project(
         database_path,
         args.project_id,
         email,
-        fixture_set["project_name"],
+        project_name,
+        project_description,
     )
-    print(f"Dataset: {dataset} — {fixture_set['project_name']}")
+    print(f"Dataset: {'none (blank workspace)' if not seed_example else dataset} — {project_name}")
     print(f"Local environment written to {env_file} (permissions 0600).")
     print(f"Database ready at {database_path}; schema version {schema_version}.")
     print(f"Project ID: {args.project_id}")

@@ -26,6 +26,11 @@ REQUIRED_SCIENTIFIC_TABLES = (
     "property_profiles",
     "information_gain_observations",
     "generated_recommendations",
+    "series",
+    "series_versions",
+    "series_memberships",
+    "prediction_models",
+    "prediction_observations",
 )
 POSTGRES_MIGRATION_LOCK_KEY = 753104534946
 

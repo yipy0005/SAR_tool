@@ -89,6 +89,9 @@ def test_production_dashboard_exposes_focused_workspace_pages(production_dashboa
     assert "What changed between two compounds?" in analysis_html
     assert "MMP" in analysis_html
     assert "CELLULAR TRANSLATION" in analysis_html
+    assert "PREDICTION QUALIFICATION" in analysis_html
+    assert "predictionQualificationForm" in analysis_html
+    assert "/static/production_prediction.js" in analysis_html
 
     designs = client.get(f"/workspace/designs{query}")
     assert designs.status_code == 200

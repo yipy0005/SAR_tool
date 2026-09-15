@@ -34,8 +34,9 @@
     <meta name="csrf-token" content="{{ csrf_token }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     {% if page_view in ['overview', 'designs'] %}<script src="{{ url_for('static', filename='production.js') }}" defer></script>{% endif %}
-    {% if page_view == 'overview' %}<script src="{{ url_for('static', filename='production_visual.js') }}" defer></script>{% endif %}
+    {% if page_view == 'overview' %}<script src="{{ url_for('static', filename='production_visual.js') }}" defer></script><script src="{{ url_for('static', filename='production_series.js') }}" defer></script>{% endif %}
     {% if page_view == 'explore' %}<script src="{{ url_for('static', filename='production_explorer.js') }}" defer></script>{% endif %}
+    {% if page_view == 'analysis' %}<script src="{{ url_for('static', filename='production_prediction.js') }}" defer></script>{% endif %}
     {% if page_view == 'designs' %}<script src="{{ url_for('static', filename='production_designs.js') }}" defer></script>{% endif %}
     {% block head_scripts %}{% endblock %}
   </head>

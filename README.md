@@ -4,18 +4,18 @@ Decision-centric Flask system for medicinal chemists and biologists. The product
 
 **raw experimental data → validated identities and measurements → evidence → hypotheses → designs → new learning**
 
-The repository is being migrated from a UI prototype into a production scientific SAR system. The current implementation persists source documents and raw measurements, validates structures with RDKit, preserves qualifiers and censoring, supports quarantine-first CSV/TSV/XLSX imports, and protects production mode with a local session/CSRF boundary. Schema migrations currently apply through version 16, including measurement summaries, R-group/activity-cliff evidence, curated design candidates, project-scoped authorization, selectivity observations, persisted RDKit property profiles, cellular-translation observations, ADME evidence panels, Pareto observations, contradiction warnings, heuristic information-gap observations, generated recommendations requiring review, and quarantine-first CSV/TSV/XLSX profiling with source-cell provenance and formula policy.
+The repository is being migrated from a UI prototype into a production scientific SAR system. The current implementation persists source documents and raw measurements, validates structures with RDKit, preserves qualifiers and censoring, supports quarantine-first CSV/TSV/XLSX imports, and protects production mode with a local session/CSRF boundary. Schema migrations currently apply through version 19, including measurement summaries, R-group/activity-cliff evidence, curated design candidates, project-scoped authorization, selectivity observations, persisted RDKit property profiles, cellular-translation observations, ADME evidence panels, Pareto observations, contradiction warnings, heuristic information-gap observations, generated recommendations requiring review, quarantine-first CSV/TSV/XLSX profiling with source-cell provenance and formula policy, versioned project-scoped series memberships, bounded compound search with projection metadata, and qualification-gated prediction models with applicability-domain observations.
 
 ## Current release boundary
 
-The default `SAR_ENV=demo` mode renders the illustrative dashboard from `/Users/yipyewmun/GitHub/SAR_tool/sar_data.py`. Demo mode is intentionally labelled and must not be used for scientific decisions.
+The default `SAR_ENV=local` mode renders the persisted production-shaped workspace from the configured local SQLite database, with no synthetic fallback. The illustrative dashboard from `/Users/yipyewmun/GitHub/SAR_tool/sar_data.py` is available only through explicit `SAR_ENV=demo SAR_DEMO_MODE=true` opt-in and must not be used for scientific decisions.
 
 Production mode never falls back to that data. It reads only persisted records from the configured SQLite or PostgreSQL backend. Raw observations, derived analyses, curated designs, and generated recommendations remain separate; the UI and APIs expose derived SAR outputs only after a versioned run and never present a candidate as experimentally confirmed.
 
 Implemented production foundation:
 
 - Pixi-pinned Python, Flask, Pytest, and RDKit runtime.
-- SQLite schema with forward-only migrations in `/Users/yipyewmun/GitHub/SAR_tool/migrations/`; current schema version is 16.
+- SQLite schema with forward-only migrations in `/Users/yipyewmun/GitHub/SAR_tool/migrations/`; current schema version is 19.
 - Backend-aware database layer with an exact Pixi-pinned psycopg 3.3.4 adapter for PostgreSQL URLs, while preserving SQLite as the default local backend.
 - Compound, structure record, source document, import batch, assay definition, assay run, raw measurement, measurement summary, hypothesis, analysis, claim, activity-cliff, R-group, design-candidate, and audit entities.
 - RDKit sanitization, canonical/isomeric SMILES, InChIKey, stereochemistry status, disconnected-component warnings, and RDKit-rendered SVG structures.
@@ -39,7 +39,9 @@ Implemented production foundation:
 - Heuristic information-gap analysis with explicit target contexts, replicate/censoring/missingness/contradiction components, persisted assumptions and limitations, and an explicit non-predictive uncertainty label.
 - Generated evidence-gap recommendations that cite persisted observations, remain separate from curated design candidates, require human review, and cannot be marked experimentally confirmed.
 - Project-scoped JSON/CSV exports with bounded row counts, raw/derived/curated/generated origin labels, provenance fields, and successful-export audit events.
-- Production dashboard read models for raw measurements, derived summaries/analyses, curated design candidates, and generated recommendations with visible origin labels.
+- Production dashboard read models for raw measurements, derived summaries/analyses, curated design candidates, generated recommendations, and project-scoped versioned series memberships with visible origin labels.
+- Bounded project-scoped compound search with indexed registration/name/structure lookup, pagination, search timing, index-version, and canonical-projection status metadata.
+- Qualification-gated RDKit similarity prediction models with explicit training/validation selection, internal metrics, applicability-domain status, uncertainty, persisted prediction observations, and a hard lock on unqualified inference.
 
 Not yet released for real project data:
 
@@ -47,10 +49,11 @@ Not yet released for real project data:
 - Centralized observability sink, alerting, retention policy, and automated restore rehearsal in the target hosting environment.
 - Target-host PostgreSQL failure recovery, physical-backup verification, and sustained deployment-level load qualification. The isolated synthetic PostgreSQL 16.4 run has passed schema 14, 13 scientific tables, 73 indexes, 62 foreign keys, advisory-locked concurrent migrations (4/4), transaction rollback, concurrent project/analysis writes, information-gap and generated-recommendation persistence/review, 8/8 two-worker readiness requests, and `pg_dump`/`pg_restore` into an isolated database.
 - Browser end-to-end verification in this environment and qualified scientific review using synthetic fixtures.
+- Qualification of predictive inference on real project data remains external: provide an independently held-out, representative chemical series or prospective validation set, predeclare endpoint-specific acceptance thresholds, assess applicability-domain coverage and calibration, and obtain qualified scientific review. Synthetic fixtures validate implementation behavior only.
 
-## Run the demo locally
+## Run the local production-shaped workspace
 
-All Python dependencies and Python commands are managed through Pixi:
+All Python dependencies and Python commands are managed through Pixi. The normal startup path uses `SAR_ENV=local`, `SAR_DEMO_MODE=false`, a persisted SQLite database under `instance/workbench/`, and no synthetic fallback:
 
 ```bash
 cd /Users/yipyewmun/GitHub/SAR_tool
@@ -58,15 +61,15 @@ pixi install
 pixi run start
 ```
 
-Open [http://127.0.0.1:5001](http://127.0.0.1:5001). Port `5001` avoids the macOS AirPlay Receiver conflict on port `5000`.
+Open [http://127.0.0.1:5002](http://127.0.0.1:5002). Create a blank project, import your own CSV/TSV/XLSX results, review the evidence, and run the qualification-gated prediction workflow from the production workspace. The local mode is intended for loopback use; use `pixi run setup-local --no-seed-example` plus `pixi run start-local` when you need authenticated local production settings.
 
-Run tests:
+The illustrative dashboard remains available only through explicit opt-in and is not a scientific data path:
 
 ```bash
-pixi run test
+SAR_ENV=demo SAR_DEMO_MODE=true pixi run start
 ```
 
-## Set up the local app with synthetic example data
+## Optional synthetic example-data setup
 
 For a Mac-only production-shaped smoke test, use the interactive Pixi command instead of the illustrative demo task:
 
@@ -178,6 +181,14 @@ Production-shaped endpoints:
 - `GET /api/v1/imports/<import_id>`
 - `POST /api/v1/imports/<import_id>/commit`
 - `GET /api/v1/compounds?project_id=...`
+- `GET /api/v1/search/compounds?project_id=...&q=...&limit=...&offset=...`
+- `GET, POST /api/v1/predictions`
+- `POST /api/v1/predictions/train`
+- `GET /api/v1/predictions/<model_id>?project_id=...`
+- `POST /api/v1/predictions/<model_id>/predict`
+- `GET, POST /api/v1/series`
+- `GET /api/v1/series/<series_id>?project_id=...`
+- `POST /api/v1/series/<series_id>/versions`
 - `GET /api/v1/measurements?project_id=...`
 - `GET, POST /api/v1/hypotheses`
 - `POST /api/v1/measurement-summaries`
@@ -229,6 +240,7 @@ A production import is intentionally two-phase. Preview stores source content ou
 - Pareto objectives must identify their source and direction; observed summaries and derived properties retain separate evidence classes, while incomplete objectives are excluded from the front.
 - Contradiction analysis preserves conflicting summary IDs and marks warnings unreconciled until qualified review resolves them.
 - Information-gap scores are assumption-bound heuristics, not predictive or model-based expected information gain; raw and weighted components, context priorities, replicate thresholds, and limitations remain persisted.
+- Prediction models use only exact compatible observed summaries, persist feature/validation policies and uncertainty, expose applicability-domain status, and remain locked unless their declared internal validation gate passes; internal validation is not external scientific qualification.
 - Generated recommendations cite persisted evidence-gap observations, remain separate from curated design candidates, require explicit human review, and are never experimentally confirmed by the workflow.
 - Exports preserve project scope, provenance, data-origin labels, and audit events; bounded export safety limits do not silently truncate scientific records.
 - Imported data, derived values, hypotheses, and predictions must remain distinct.
@@ -236,7 +248,7 @@ A production import is intentionally two-phase. Preview stores source content ou
 
 ## Test and release gates
 
-The current production slice is validated with `pixi run test` (87 tests), including structure identity, invalid-structure rejection, censored pIC50 conversion, quarantine/commit behavior, transaction rollback, duplicate and concurrent import protection, upload confinement, high-volume upload/export limits, malformed-body and safe-error handling, project-scoped evidence validation, authorization revocation races, provenance, schema-14 migration idempotence, strict current-schema/scientific-table readiness, backup integrity verification, isolated restore rehearsal, deterministic RDKit property profiles, local login, CSRF rejection, authenticated mutation, project membership and role enforcement, security headers, structured metrics and log retention, deterministic MMP analysis, replicate-aware summaries, R-group/activity-cliff analysis, primary/comparator selectivity analysis, transparent design ranking, information-gap heuristics, generated recommendation review boundaries, project-scoped JSON/CSV exports, PostgreSQL backend behavior, PostgreSQL advisory migration locking, PostgreSQL backup/archive operations, SQLite multi-worker refusal, production API integration, deployment read-model rendering, external identity boundary validation, and immutable claim evidence links.
+The current production slice is validated with `pixi run test` (113 tests), including structure identity, invalid-structure rejection, censored pIC50 conversion, quarantine/commit behavior, transaction rollback, duplicate and concurrent import protection, upload confinement, high-volume upload/export limits, malformed-body and safe-error handling, project-scoped evidence validation, authorization revocation races, provenance, schema-19 migration idempotence, strict current-schema/scientific-table readiness, backup integrity verification, isolated restore rehearsal, deterministic RDKit property profiles, local login, CSRF rejection, authenticated mutation, project membership and role enforcement, security headers, structured metrics and log retention, deterministic MMP analysis, replicate-aware summaries, R-group/activity-cliff analysis, primary/comparator selectivity analysis, transparent design ranking, information-gap heuristics, generated recommendation review boundaries, project-scoped JSON/CSV exports, PostgreSQL backend behavior, PostgreSQL advisory migration locking, PostgreSQL backup/archive operations, SQLite multi-worker refusal, production API integration, deployment read-model rendering, external identity boundary validation, immutable claim evidence links, versioned project-scoped series membership, evidence-trail rendering, bounded project-scoped compound search, qualification-gated prediction training, applicability, and inference-lock tests, local no-demo startup coverage, and blank setup refusal for preloaded scientific records.
 
 Before accepting real proprietary data, complete the remaining gates:
 

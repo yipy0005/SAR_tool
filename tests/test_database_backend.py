@@ -91,11 +91,11 @@ def test_restore_rehearsal_isolated_copy_is_ready(tmp_path):
     result = restore_rehearsal(str(backup))
 
     assert result == {
-        "schema_version": 16,
-        "scientific_tables": 13,
+        "schema_version": 19,
+        "scientific_tables": 18,
         "integrity": "ok",
         "database_ready": True,
-        "source_schema_version": 16,
+        "source_schema_version": 19,
     }
     assert backup.read_bytes() == before
 
@@ -124,7 +124,7 @@ def test_database_ready_rejects_stale_schema(tmp_path):
     apply_migrations(str(database_path))
     connection = sqlite3.connect(database_path)
     try:
-        connection.execute("DELETE FROM schema_migrations WHERE version = 16")
+        connection.execute("DELETE FROM schema_migrations WHERE version = 19")
         connection.commit()
     finally:
         connection.close()
