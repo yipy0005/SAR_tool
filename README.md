@@ -4,18 +4,18 @@ Decision-centric Flask system for medicinal chemists and biologists. The product
 
 **raw experimental data → validated identities and measurements → evidence → hypotheses → designs → new learning**
 
-The repository is being migrated from a UI prototype into a production scientific SAR system. The current implementation persists source documents and raw measurements, validates structures with RDKit, preserves qualifiers and censoring, supports quarantine-first CSV/TSV/XLSX imports, and protects production mode with a local session/CSRF boundary. Schema migrations currently apply through version 19, including measurement summaries, R-group/activity-cliff evidence, curated design candidates, project-scoped authorization, selectivity observations, persisted RDKit property profiles, cellular-translation observations, ADME evidence panels, Pareto observations, contradiction warnings, heuristic information-gap observations, generated recommendations requiring review, quarantine-first CSV/TSV/XLSX profiling with source-cell provenance and formula policy, versioned project-scoped series memberships, bounded compound search with projection metadata, and qualification-gated prediction models with applicability-domain observations.
+The repository is being migrated from a UI prototype into a production scientific SAR system. The current implementation persists source documents and raw measurements, validates structures with RDKit, preserves qualifiers and censoring, supports quarantine-first CSV/TSV/XLSX imports, and protects production mode with a local session/CSRF boundary. Schema migrations currently apply through version 20, including measurement summaries, R-group/activity-cliff evidence, curated design candidates, project-scoped authorization, selectivity observations, persisted RDKit property profiles, cellular-translation observations, ADME evidence panels, Pareto observations, contradiction warnings, heuristic information-gap observations, generated recommendations requiring review, quarantine-first CSV/TSV/XLSX profiling with source-cell provenance and formula policy, versioned project-scoped series memberships, bounded compound search with projection metadata, qualification-gated prediction models with applicability-domain observations, and project-scoped bulk prodrug-to-active-form relationships with endpoint comparison evidence.
 
 ## Current release boundary
 
-The default `SAR_ENV=local` mode renders the persisted production-shaped workspace from the configured local SQLite database, with no synthetic fallback. The illustrative dashboard from `/Users/yipyewmun/GitHub/SAR_tool/sar_data.py` is available only through explicit `SAR_ENV=demo SAR_DEMO_MODE=true` opt-in and must not be used for scientific decisions.
+The default `SAR_ENV=local` mode renders the persisted production-shaped workspace from the configured local SQLite database, with no synthetic fallback. The illustrative dashboard from `/Users/yipy/Documents/GitHub/SAR_tool/sar_data.py` is available only through explicit `SAR_ENV=demo SAR_DEMO_MODE=true` opt-in and must not be used for scientific decisions.
 
 Production mode never falls back to that data. It reads only persisted records from the configured SQLite or PostgreSQL backend. Raw observations, derived analyses, curated designs, and generated recommendations remain separate; the UI and APIs expose derived SAR outputs only after a versioned run and never present a candidate as experimentally confirmed.
 
 Implemented production foundation:
 
 - Pixi-pinned Python, Flask, Pytest, and RDKit runtime.
-- SQLite schema with forward-only migrations in `/Users/yipyewmun/GitHub/SAR_tool/migrations/`; current schema version is 19.
+- SQLite schema with forward-only migrations in `/Users/yipy/Documents/GitHub/SAR_tool/migrations/`; current schema version is 20.
 - Backend-aware database layer with an exact Pixi-pinned psycopg 3.3.4 adapter for PostgreSQL URLs, while preserving SQLite as the default local backend.
 - Compound, structure record, source document, import batch, assay definition, assay run, raw measurement, measurement summary, hypothesis, analysis, claim, activity-cliff, R-group, design-candidate, and audit entities.
 - RDKit sanitization, canonical/isomeric SMILES, InChIKey, stereochemistry status, disconnected-component warnings, and RDKit-rendered SVG structures.
@@ -25,7 +25,7 @@ Implemented production foundation:
 - Project-scoped authorization for local identities: owner/editor/viewer roles, membership-filtered project reads, CSRF-protected member management, and ownership-scoped quarantined imports.
 - Structured JSON request logs, request/status/endpoint counters, an authenticated operational metrics endpoint, and configurable stdout/file sink retention.
 - Pixi-managed database initialization, readiness, SQLite backup/restore verification, and PostgreSQL custom-format backup/archive verification/restore-rehearsal commands.
-- A separate WSGI entry point plus conservative single-worker Gunicorn, systemd, and HTTPS reverse-proxy examples in `/Users/yipyewmun/GitHub/SAR_tool/deploy/`.
+- A separate WSGI entry point plus conservative single-worker Gunicorn, systemd, and HTTPS reverse-proxy examples in `/Users/yipy/Documents/GitHub/SAR_tool/deploy/`.
 - Deterministic RDKit MMP analysis with versioned analysis runs, assay compatibility grouping, MCS context, effect sizes, censored-value exclusion, and immutable observation claims linked to pair evidence.
 - Deterministic replicate-aware measurement summaries with technical/biological/unspecified counts, assay compatibility checks, censoring/missingness preservation, dispersion, and source IDs.
 - Explicit-scaffold R-group decomposition and activity-cliff analysis over observed compatible summaries only, with persisted versioned evidence.
@@ -45,7 +45,7 @@ Implemented production foundation:
 
 Not yet released for real project data:
 
-- External SSO/identity provider integration beyond the local identity boundary. `/Users/yipyewmun/GitHub/SAR_tool/identity_provider.py` now validates an HTTPS OIDC/SAML configuration contract without implementing provider-specific token exchange or session mapping.
+- External SSO/identity provider integration beyond the local identity boundary. `/Users/yipy/Documents/GitHub/SAR_tool/identity_provider.py` now validates an HTTPS OIDC/SAML configuration contract without implementing provider-specific token exchange or session mapping.
 - Centralized observability sink, alerting, retention policy, and automated restore rehearsal in the target hosting environment.
 - Target-host PostgreSQL failure recovery, physical-backup verification, and sustained deployment-level load qualification. The isolated synthetic PostgreSQL 16.4 run has passed schema 14, 13 scientific tables, 73 indexes, 62 foreign keys, advisory-locked concurrent migrations (4/4), transaction rollback, concurrent project/analysis writes, information-gap and generated-recommendation persistence/review, 8/8 two-worker readiness requests, and `pg_dump`/`pg_restore` into an isolated database.
 - Browser end-to-end verification in this environment and qualified scientific review using synthetic fixtures.
@@ -56,12 +56,14 @@ Not yet released for real project data:
 All Python dependencies and Python commands are managed through Pixi. The normal startup path uses `SAR_ENV=local`, `SAR_DEMO_MODE=false`, a persisted SQLite database under `instance/workbench/`, and no synthetic fallback:
 
 ```bash
-cd /Users/yipyewmun/GitHub/SAR_tool
+cd /Users/yipy/Documents/GitHub/SAR_tool
 pixi install
 pixi run start
 ```
 
-Open [http://127.0.0.1:5002](http://127.0.0.1:5002). Create a blank project, import your own CSV/TSV/XLSX results, review the evidence, and run the qualification-gated prediction workflow from the production workspace. The local mode is intended for loopback use; use `pixi run setup-local --no-seed-example` plus `pixi run start-local` when you need authenticated local production settings.
+Open [http://127.0.0.1:5002](http://127.0.0.1:5002). Create a blank project, import your own CSV/TSV/XLSX results, review the evidence, and run the qualification-gated prediction workflow from the production workspace. The local mode is intended for loopback use; for an authenticated blank workspace, use new database, upload, and environment-file paths as shown in [`docs/WEB_APP_GUIDE.md`](docs/WEB_APP_GUIDE.md), then start that environment with `pixi run python scripts/setup_local.py --start-existing --env-file <path-to-local.env>`.
+
+For the screen-by-screen web-app workflow, upload formats, review boundaries, troubleshooting, and synthetic examples, see [`docs/WEB_APP_GUIDE.md`](docs/WEB_APP_GUIDE.md). The ready-to-upload prodrug example consists of [`examples/example_prodrug_active_measurements.csv`](examples/example_prodrug_active_measurements.csv) and [`examples/example_prodrug_pairs.csv`](examples/example_prodrug_pairs.csv).
 
 The illustrative dashboard remains available only through explicit opt-in and is not a scientific data path:
 
@@ -69,21 +71,35 @@ The illustrative dashboard remains available only through explicit opt-in and is
 SAR_ENV=demo SAR_DEMO_MODE=true pixi run start
 ```
 
+## Structure editor (Ketcher)
+
+**Find by structure** works out of the box with the built-in simple sketcher. To use [EPAM Ketcher](https://github.com/epam/ketcher) as the main editor, install the pinned release once and restart the app:
+
+```bash
+pixi run fetch-ketcher
+```
+
+This downloads `ketcher-standalone-3.18.0.zip` (about 35 MB) from GitHub Releases, refuses it unless the SHA-256 matches the value pinned in `scripts/fetch_ketcher.py`, and installs only the standalone editor (about 30 MB) into the gitignored `vendor/ketcher/`. For an offline machine, copy the zip across and run `pixi run fetch-ketcher --from-zip <path-to-zip>`; the same checksum check applies. Set `SAR_KETCHER_DIR` to serve an install from another location.
+
+Ketcher runs in a same-origin iframe at `/ketcher/`. Only that frame's Content-Security-Policy adds `'wasm-unsafe-eval'` (WebAssembly chemistry engine) and `worker-src 'self' blob:`, and only `/ketcher/*` sends `X-Frame-Options: SAMEORIGIN`; every other page keeps the strict policy and `DENY`. Drawings are converted to molfiles and searched with RDKit; nothing is saved to project data. If Ketcher is missing or fails to start, the dialog falls back to the simple sketcher.
+
+To upgrade, change `KETCHER_VERSION`, `RELEASE_URL` and `RELEASE_SHA256` together, then rerun the task. Ketcher is Apache-2.0; its licence and notice are in [`third_party/ketcher/`](third_party/ketcher/).
+
 ## Optional synthetic example-data setup
 
 For a Mac-only production-shaped smoke test, use the interactive Pixi command instead of the illustrative demo task:
 
 ```bash
-cd /Users/yipyewmun/GitHub/SAR_tool
+cd /Users/yipy/Documents/GitHub/SAR_tool
 pixi install
 pixi run local
 ```
 
-The setup prompts for a local login email and password, lets you select the recommended drug-like SAR series or the compact smoke fixture, creates an isolated SQLite database under `/Users/yipyewmun/GitHub/SAR_tool/instance/local/`, writes the ignored `instance/local.env` file with mode `0600`, creates the owner project, and asks whether to import the selected measurements and contradiction follow-up. It can then start the pinned Gunicorn WSGI server at `http://127.0.0.1:5001`.
+The setup prompts for a local login email and password, lets you select the recommended showcase SAR series, the broader drug-like SAR series, or the compact smoke fixture, creates an isolated SQLite database under `/Users/yipy/Documents/GitHub/SAR_tool/instance/local/`, writes the ignored `instance/local.env` file with mode `0600`, creates the owner project, and asks whether to import the selected measurements and contradiction follow-up. It can then start the pinned Gunicorn WSGI server at `http://127.0.0.1:5001`.
 
-The recommended drug-like profile is a ten-compound aryl–methylene–amide–pyridyl series with H, methyl, methoxy, fluoro, chloro, CF3, heteroaryl, linker, N-methyl-amide, and morpholine variations. The first six compounds mirror the supplied SAR-diagram pattern: H, CH3, OCH3, F, Cl, and CF3 R¹ variants with IC50 values of 120, 250, 480, 45, 18, and 6 nM. The compact profile remains available for small importer smoke tests.
+The default showcase profile is a ten-compound aryl–methylene–amide–pyridyl series with an intentionally obvious IC50 gradient, correlated cellular response, increasing selectivity, a visible activity cliff, and readable ADME trade-offs. It is synthetic demonstration data, not a validated scientific conclusion. The broader drug-like profile remains available for the original H, CH3, OCH3, F, Cl, CF3, heteroaryl, linker, N-methyl-amide, and morpholine series. The compact profile remains available for small importer smoke tests.
 
-To select a profile non-interactively, pass `--dataset druglike` or `--dataset compact` to `/Users/yipyewmun/GitHub/SAR_tool/scripts/setup_local.py`.
+To select a profile non-interactively, pass `--dataset showcase`, `--dataset druglike`, or `--dataset compact` to `/Users/yipy/Documents/GitHub/SAR_tool/scripts/setup_local.py`. The complete showcase observations and follow-up sequence are documented in `/Users/yipy/Documents/GitHub/SAR_tool/examples/README.md`.
 
 For setup without starting the server, use:
 
@@ -99,7 +115,7 @@ SAR_GUNICORN_PORT=5010 pixi run start-local
 open http://127.0.0.1:5010
 ```
 
-The drug-like primary fixture is `/Users/yipyewmun/GitHub/SAR_tool/examples/example_druglike_measurements.csv` and its optional follow-up is `/Users/yipyewmun/GitHub/SAR_tool/examples/example_druglike_contradiction_followup.csv`. The compact smoke fixtures remain `/Users/yipyewmun/GitHub/SAR_tool/examples/example_measurements.csv` and `/Users/yipyewmun/GitHub/SAR_tool/examples/example_contradiction_followup.csv`. The complete import and analysis sequence is documented in `/Users/yipyewmun/GitHub/SAR_tool/examples/README.md`.
+The showcase primary fixture is `/Users/yipy/Documents/GitHub/SAR_tool/examples/example_showcase_measurements.csv` and its optional follow-up is `/Users/yipy/Documents/GitHub/SAR_tool/examples/example_showcase_followup.csv`. The broader drug-like fixtures remain `/Users/yipy/Documents/GitHub/SAR_tool/examples/example_druglike_measurements.csv` and `/Users/yipy/Documents/GitHub/SAR_tool/examples/example_druglike_contradiction_followup.csv`; the compact smoke fixtures remain `/Users/yipy/Documents/GitHub/SAR_tool/examples/example_measurements.csv` and `/Users/yipy/Documents/GitHub/SAR_tool/examples/example_contradiction_followup.csv`. The complete import and analysis sequence is documented in `/Users/yipy/Documents/GitHub/SAR_tool/examples/README.md`.
 
 The local setup defaults `SAR_SECURE_COOKIES=false` because this smoke test uses plain loopback HTTP. Use `SAR_SECURE_COOKIES=true` only when the app is behind an HTTPS reverse proxy. Generated credentials, uploads, and the local database remain under the ignored `instance/` directory. To start over without deleting the existing setup, provide a different `--database`, `--upload-dir`, and `--env-file` path to `scripts/setup_local.py`.
 
@@ -157,7 +173,7 @@ pixi run db-init
 pixi run start
 ```
 
-This local auth mode is a first deployment boundary, not an enterprise SSO implementation. Migration 006 does not guess ownership for pre-existing projects; assign an owner membership explicitly before those projects are exposed to a local identity. Do not expose the development Flask server directly to the public internet; use the pinned WSGI entry point, HTTPS-terminating reverse proxy, restricted host configuration, non-privileged service account, and secret manager. Deployment examples and the SQLite one-writer contract are documented in `/Users/yipyewmun/GitHub/SAR_tool/deploy/README.md`.
+This local auth mode is a first deployment boundary, not an enterprise SSO implementation. Migration 006 does not guess ownership for pre-existing projects; assign an owner membership explicitly before those projects are exposed to a local identity. Do not expose the development Flask server directly to the public internet; use the pinned WSGI entry point, HTTPS-terminating reverse proxy, restricted host configuration, non-privileged service account, and secret manager. Deployment examples and the SQLite one-writer contract are documented in `/Users/yipy/Documents/GitHub/SAR_tool/deploy/README.md`.
 
 ## API foundation
 
@@ -187,6 +203,10 @@ Production-shaped endpoints:
 - `GET /api/v1/predictions/<model_id>?project_id=...`
 - `POST /api/v1/predictions/<model_id>/predict`
 - `GET, POST /api/v1/series`
+- `POST /api/v1/sar/discover`
+- `GET, POST /api/v1/compound-relationships`
+- `POST /api/v1/compound-relationships/preview`
+- `POST /api/v1/analysis/prodrug-comparison`
 - `GET /api/v1/series/<series_id>?project_id=...`
 - `POST /api/v1/series/<series_id>/versions`
 - `GET /api/v1/measurements?project_id=...`
@@ -242,13 +262,14 @@ A production import is intentionally two-phase. Preview stores source content ou
 - Information-gap scores are assumption-bound heuristics, not predictive or model-based expected information gain; raw and weighted components, context priorities, replicate thresholds, and limitations remain persisted.
 - Prediction models use only exact compatible observed summaries, persist feature/validation policies and uncertainty, expose applicability-domain status, and remain locked unless their declared internal validation gate passes; internal validation is not external scientific qualification.
 - Generated recommendations cite persisted evidence-gap observations, remain separate from curated design candidates, require explicit human review, and are never experimentally confirmed by the workflow.
+- Bulk prodrug-to-active-form mappings are explicit project-scoped relationships; batch endpoint comparisons require compatible exact summaries and preserve missing, censored, unit-conflict, and relationship-review states.
 - Exports preserve project scope, provenance, data-origin labels, and audit events; bounded export safety limits do not silently truncate scientific records.
 - Imported data, derived values, hypotheses, and predictions must remain distinct.
 - No production SAR statement is valid until it points to source measurements, assay context, transformation policy, analysis version, and contradictory evidence handling.
 
 ## Test and release gates
 
-The current production slice is validated with `pixi run test` (113 tests), including structure identity, invalid-structure rejection, censored pIC50 conversion, quarantine/commit behavior, transaction rollback, duplicate and concurrent import protection, upload confinement, high-volume upload/export limits, malformed-body and safe-error handling, project-scoped evidence validation, authorization revocation races, provenance, schema-19 migration idempotence, strict current-schema/scientific-table readiness, backup integrity verification, isolated restore rehearsal, deterministic RDKit property profiles, local login, CSRF rejection, authenticated mutation, project membership and role enforcement, security headers, structured metrics and log retention, deterministic MMP analysis, replicate-aware summaries, R-group/activity-cliff analysis, primary/comparator selectivity analysis, transparent design ranking, information-gap heuristics, generated recommendation review boundaries, project-scoped JSON/CSV exports, PostgreSQL backend behavior, PostgreSQL advisory migration locking, PostgreSQL backup/archive operations, SQLite multi-worker refusal, production API integration, deployment read-model rendering, external identity boundary validation, immutable claim evidence links, versioned project-scoped series membership, evidence-trail rendering, bounded project-scoped compound search, qualification-gated prediction training, applicability, and inference-lock tests, local no-demo startup coverage, and blank setup refusal for preloaded scientific records.
+The current production slice is validated with `pixi run test` (121 tests), including structure identity, invalid-structure rejection, censored pIC50 conversion, quarantine/commit behavior, transaction rollback, duplicate and concurrent import protection, upload confinement, high-volume upload/export limits, malformed-body and safe-error handling, project-scoped evidence validation, authorization revocation races, provenance, schema-20 migration idempotence, strict current-schema/scientific-table readiness, backup integrity verification, isolated restore rehearsal, deterministic RDKit property profiles, local login, CSRF rejection, authenticated mutation, project membership and role enforcement, security headers, structured metrics and log retention, deterministic MMP analysis, replicate-aware summaries, R-group/activity-cliff analysis, primary/comparator selectivity analysis, transparent design ranking, information-gap heuristics, generated recommendation review boundaries, project-scoped JSON/CSV exports, PostgreSQL backend behavior, PostgreSQL advisory migration locking, PostgreSQL backup/archive operations, SQLite multi-worker refusal, production API integration, deployment read-model rendering, external identity boundary validation, immutable claim evidence links, versioned project-scoped series membership, evidence-trail rendering, bounded project-scoped compound search, qualification-gated prediction training, applicability, and inference-lock tests, local no-demo startup coverage, and blank setup refusal for preloaded scientific records.
 
 Before accepting real proprietary data, complete the remaining gates:
 
