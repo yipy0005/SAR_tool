@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 *.log
 .kiro/
+# Ketcher editor files, installed by `pixi run fetch-ketcher` (license text is in third_party/ketcher/)
+vendor/ketcher/
