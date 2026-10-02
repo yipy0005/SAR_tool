@@ -80,6 +80,61 @@ def test_setup_local_seeds_synthetic_workflow(tmp_path: Path) -> None:
     assert "test-only-password" not in env_text
 
 
+def test_setup_local_showcase_series(tmp_path: Path) -> None:
+    database_path = tmp_path / "showcase.db"
+    upload_dir = tmp_path / "showcase-uploads"
+    env_file = tmp_path / "showcase.env"
+    environment = os.environ.copy()
+    environment["SAR_SETUP_PASSWORD"] = "test-only-password"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SETUP_SCRIPT),
+            "--non-interactive",
+            "--seed-example",
+            "--no-seed-contradiction",
+            "--dataset",
+            "showcase",
+            "--email",
+            "scientist@example.org",
+            "--database",
+            str(database_path),
+            "--upload-dir",
+            str(upload_dir),
+            "--env-file",
+            str(env_file),
+            "--project-id",
+            "showcase_project",
+            "--port",
+            "5014",
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    with sqlite3.connect(database_path) as connection:
+        counts = {
+            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("projects", "compounds", "measurements", "measurement_summaries")
+        }
+        project_name = connection.execute(
+            "SELECT name FROM projects WHERE id = ?", ("showcase_project",)
+        ).fetchone()[0]
+
+    assert counts == {
+        "projects": 1,
+        "compounds": 10,
+        "measurements": 89,
+        "measurement_summaries": 70,
+    }
+    assert project_name == "Synthetic showcase SAR series"
+    assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+
+
 def test_setup_local_druglike_series(tmp_path: Path) -> None:
     database_path = tmp_path / "druglike.db"
     upload_dir = tmp_path / "druglike-uploads"

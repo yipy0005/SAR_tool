@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -124,6 +125,85 @@ def infer_mapping(
     return mapping
 
 
+_WIDE_ENDPOINT_DEFAULTS: dict[str, tuple[str, str]] = {
+    "ic50": ("IC50", "nM"),
+    "ec50": ("EC50", "nM"),
+    "ki": ("Ki", "nM"),
+    "kd": ("Kd", "nM"),
+    "cellular": ("Cellular", "pIC50"),
+    "offtarget": ("OffTarget", "pIC50"),
+    "clint": ("CLint", "uL/min/mg"),
+    "papp": ("Papp", "10^-6 cm/s"),
+    "solubility": ("Solubility", "µM"),
+    "cyp3a4": ("CYP3A4", "µM"),
+    "logp": ("LogP", "dimensionless"),
+    "tpsa": ("TPSA", "A2"),
+    "mw": ("Molecular weight", "Da"),
+    "hbd": ("HBD", "count"),
+    "hba": ("HBA", "count"),
+}
+_WIDE_METADATA_HEADERS = {"date", "replicate", "qualifier", "unit", "notes", "comment", "plate", "batch", "run"}
+
+
+def infer_wide_endpoint_mapping(
+    headers: list[str],
+    column_keys: list[str],
+    mapping: dict[str, str | None],
+) -> dict[str, dict[str, Any]]:
+    """Infer common wide endpoint columns and mark guessed units for review."""
+    reserved = {
+        mapping.get(field)
+        for field in ("compound_id", "structure", "qualifier", "replicate", "date")
+        if mapping.get(field)
+    }
+    result: dict[str, dict[str, Any]] = {}
+    for header, key in zip(headers, column_keys):
+        if key in reserved:
+            continue
+        cleaned = re.sub(r"[^a-z0-9]+", "_", str(header).strip().lower()).strip("_")
+        if not cleaned or cleaned in _WIDE_METADATA_HEADERS:
+            continue
+        base = cleaned
+        unit = ""
+        explicit_unit = True
+        for suffix, suffix_unit in (
+            ("_pic50", "pIC50"),
+            ("_nm", "nM"),
+            ("_um", "µM"),
+            ("_micromolar", "µM"),
+            ("_ul_min_mg", "uL/min/mg"),
+            ("_10_6_cm_s", "10^-6 cm/s"),
+            ("_a2", "A2"),
+            ("_da", "Da"),
+        ):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)].rstrip("_")
+                unit = suffix_unit
+                break
+        if not unit:
+            compact = base.replace("_", "")
+            for token, (label, default_unit) in _WIDE_ENDPOINT_DEFAULTS.items():
+                if compact == token:
+                    base = token
+                    unit = default_unit
+                    explicit_unit = False
+                    break
+        lookup = base.replace("_", "")
+        if not unit or (base not in _WIDE_ENDPOINT_DEFAULTS and lookup not in _WIDE_ENDPOINT_DEFAULTS):
+            continue
+        label, default_unit = _WIDE_ENDPOINT_DEFAULTS.get(
+            base,
+            _WIDE_ENDPOINT_DEFAULTS.get(lookup, (str(header).strip(), unit)),
+        )
+        result[key] = {
+            "assay": label,
+            "unit": unit or default_unit,
+            "header": str(header),
+            "unit_inferred": not explicit_unit,
+        }
+    return result
+
+
 def _row_value(row: dict[str, Any], mapping: dict[str, str | None], field: str) -> str:
     header = mapping.get(field)
     return "" if not header else str(row.get(header, "") or "").strip()
@@ -220,7 +300,14 @@ def preview_upload(
     column_keys = tabular.column_keys or _column_keys(headers)
     candidates = mapping_candidates(headers, column_keys)
     mapping = infer_mapping(headers, column_keys, mapping_overrides)
-    required = list(REQUIRED_MAPPING_FIELDS)
+    wide_endpoint_mapping: dict[str, dict[str, Any]] = {}
+    if mapping.get("compound_id") and mapping.get("structure") and not (
+        mapping.get("assay") and mapping.get("result") and mapping.get("unit")
+    ):
+        wide_endpoint_mapping = infer_wide_endpoint_mapping(headers, column_keys, mapping)
+        if wide_endpoint_mapping:
+            mapping["wide_endpoint_mapping"] = wide_endpoint_mapping
+    required = list(("compound_id", "structure") if wide_endpoint_mapping else REQUIRED_MAPPING_FIELDS)
     missing_fields = [field for field in required if not mapping.get(field)]
     normalized_header_keys = [_header_key(header) for header in headers]
     duplicate_headers = sorted({key for key in normalized_header_keys if normalized_header_keys.count(key) > 1 and key})
@@ -269,8 +356,36 @@ def preview_upload(
         for field, field_candidates in candidates.items()
         if field_candidates
     }
+    if wide_endpoint_mapping:
+        mapping_options["wide_endpoint_columns"] = [
+            {"key": key, "label": spec["header"], "assay": spec["assay"], "unit": spec["unit"]}
+            for key, spec in wide_endpoint_mapping.items()
+        ]
+        inferred = [spec["header"] for spec in wide_endpoint_mapping.values() if spec.get("unit_inferred")]
+        mapping_issues.append({
+            "code": "wide_endpoint_columns",
+            "severity": "warning",
+            "message": "Wide endpoint columns were expanded into assay rows. Verify inferred units before saving."
+            + (f" Inferred units: {', '.join(inferred)}." if inferred else ""),
+        })
+    source_rows = list(zip(tabular.rows, tabular.locations))
+    if wide_endpoint_mapping:
+        expanded_rows = []
+        for row, location in source_rows:
+            for column_key, spec in wide_endpoint_mapping.items():
+                expanded_row = dict(row)
+                expanded_row["__sar_wide_endpoint"] = {"column": column_key, **spec}
+                expanded_location = dict(location)
+                expanded_location["wide_endpoint"] = {
+                    "column": column_key,
+                    "header": spec["header"],
+                    "assay": spec["assay"],
+                    "unit": spec["unit"],
+                }
+                expanded_rows.append((expanded_row, expanded_location))
+        source_rows = expanded_rows
     rows: list[PreviewRow] = []
-    for number, (row, location) in enumerate(zip(tabular.rows, tabular.locations)):
+    for number, (row, location) in enumerate(source_rows):
         errors: list[dict[str, str]] = []
         warnings: list[str] = []
         formula_cells = list(location.get("formula_cells", []))
@@ -295,11 +410,17 @@ def preview_upload(
                     })
                 else:
                     warnings.append(f"Metadata formula acknowledged without evaluation: {address}")
+        wide_spec = row.get("__sar_wide_endpoint")
         compound_id = _row_value(row, mapping, "compound_id")
         structure = _row_value(row, mapping, "structure")
-        assay = _row_value(row, mapping, "assay")
-        result = _row_value(row, mapping, "result")
-        unit = _row_value(row, mapping, "unit")
+        if wide_spec:
+            assay = str(wide_spec["assay"])
+            result = str(row.get(wide_spec["column"], "") or "").strip() or "not reported"
+            unit = str(wide_spec["unit"])
+        else:
+            assay = _row_value(row, mapping, "assay")
+            result = _row_value(row, mapping, "result")
+            unit = _row_value(row, mapping, "unit")
         qualifier = _row_value(row, mapping, "qualifier") or "="
         if not compound_id:
             errors.append({"code": "missing_compound_id", "message": "Compound identifier is required"})
@@ -341,10 +462,13 @@ def preview_upload(
                 "measurement": normalized_measurement.as_dict(),
             }
         source_row_id = str(location.get("row", number + (data_start_row or 2)))
+        if wide_spec:
+            source_row_id = f"{source_row_id}:{wide_spec['assay']}"
+        raw_row = {key: value for key, value in row.items() if not str(key).startswith("__sar_")}
         rows.append(
             PreviewRow(
                 source_row_id=source_row_id,
-                raw=dict(row),
+                raw=raw_row,
                 normalized=normalized,
                 errors=tuple(errors),
                 warnings=tuple(warnings),

@@ -1,0 +1,50 @@
+{# Shared presentation macros. Raw identifiers stay available but collapsed. #}
+{% macro source_ids(ids, label='source') -%}
+{%- set count = ids|length if ids else 0 -%}
+{%- if count -%}
+<details class="id-disclosure"><summary>{{ count }} {{ label }}{{ '' if count == 1 else 's' }}</summary><code>{{ ids | join('\n') }}</code></details>
+{%- else -%}—{%- endif -%}
+{%- endmacro %}
+
+{% macro table_filter(target, assays=[], placeholder='Compound ID') -%}
+<div class="table-filter" data-table-filter="{{ target }}" role="search">
+  <label><span>Find compound</span><input type="search" data-filter-text placeholder="{{ placeholder }}" autocomplete="off"></label>
+  {% if assays %}<label><span>Assay</span><select data-filter-assay><option value="">All assays</option>{% for assay in assays %}<option value="{{ assay }}">{{ assay }}</option>{% endfor %}</select></label>{% endif %}
+  <span class="table-filter__count" data-filter-count aria-live="polite"></span>
+</div>
+{%- endmacro %}
+
+{% macro summary_result(summary) -%}
+<strong>{{ summary.value | fmt_measure(summary.unit or summary.canonical_unit, summary.summary_qualifier) }}</strong>
+{%- endmacro %}
+
+{% macro summary_counts(summary) -%}
+{%- set total = summary.eligible_measurement_count + summary.censored_measurement_count + summary.missing_measurement_count -%}
+<span title="{{ summary.eligible_measurement_count }} exact · {{ summary.censored_measurement_count }} threshold · {{ summary.missing_measurement_count }} missing">n = {{ total }}</span>
+{%- if summary.censored_measurement_count or summary.missing_measurement_count %}<small class="evidence-cell-note">{{ summary.eligible_measurement_count }} exact{% if summary.censored_measurement_count %} · {{ summary.censored_measurement_count }} threshold{% endif %}{% if summary.missing_measurement_count %} · {{ summary.missing_measurement_count }} missing{% endif %}</small>{% endif %}
+{%- if summary.dispersion is not none %}<small class="evidence-cell-note">{{ summary.dispersion_method | humanize }} {{ summary.dispersion | fmt_number(summary.canonical_unit) }}</small>{% endif %}
+{%- endmacro %}
+
+{# One substituent: common name if known, else a small drawing, else its SMILES. None means hydrogen. #}
+{% macro rgroup(group) -%}
+{%- if not group -%}<span class="rgroup-value">H</span>
+{%- elif group.svg_id and group.name -%}<span class="rgroup-value rgroup-value--with-structure" title="{{ group.smiles }}">{{ svg_use(group.svg_id, group.smiles, '0 0 130 80', 'fragment-use') }}<small>{{ group.name }}</small></span>
+{%- elif group.name -%}<span class="rgroup-value" title="{{ group.smiles }}">{{ group.name }}</span>
+{%- elif group.svg_id -%}<span class="rgroup-chip__svg" title="{{ group.smiles }}">{{ svg_use(group.svg_id, group.smiles, '0 0 130 80', 'fragment-use') }}</span>
+{%- elif group.svg -%}<span class="rgroup-chip__svg" role="img" aria-label="{{ group.smiles }}" title="{{ group.smiles }}">{{ group.svg | safe }}</span>
+{%- else -%}<code title="{{ group.smiles }}">{{ group.smiles }}</code>{%- endif -%}
+{%- endmacro %}
+
+{# A pair's change by R-site (R2: F → Cl); falls back to changed-atom formulas when no R-group run covers both compounds. #}
+{% macro pair_change(item) -%}
+{%- if item.site_changes -%}
+<span class="site-changes">{% for change in item.site_changes %}<span class="site-change"><b>{{ change.label }}</b>{{ rgroup(change.a) }}<span class="site-change__arrow" aria-label="to">→</span>{{ rgroup(change.b) }}</span>{% endfor %}</span>
+{%- elif item.transformation is defined and item.transformation -%}
+<span class="change-formula" title="Changed heavy atoms outside the common substructure">{{ item.transformation.a | atom_formula }} → {{ item.transformation.b | atom_formula }}</span>
+{%- else -%}—{%- endif -%}
+{%- endmacro %}
+
+{# Algorithm versions and other reproducibility codes, collapsed under the card. #}
+{% macro method_details(version, note='') -%}
+<details class="method-details"><summary>Method details</summary>{% if note %}<p>{{ note }}</p>{% endif %}<p>Algorithm version <code>{{ version }}</code></p></details>
+{%- endmacro %}

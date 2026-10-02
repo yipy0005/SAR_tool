@@ -4,12 +4,24 @@
   const form = document.querySelector("#productionSeriesForm");
   const status = document.querySelector("#productionSeriesStatus");
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+  const projectId = document.querySelector("[data-production-project]")?.dataset.productionProject || "";
   if (!form || !status || !projectId) return;
 
   const setStatus = (message, kind = "") => {
     status.textContent = message;
     status.dataset.status = kind;
   };
+
+  const selectionCount = document.querySelector("#productionSeriesSelectionCount");
+  const updateSelectionCount = () => {
+    if (!selectionCount) return;
+    const count = form.querySelectorAll('input[name="compound_id"]:checked').length;
+    selectionCount.textContent = `${count} selected`;
+  };
+  form.addEventListener("change", (event) => {
+    if (event.target.matches('input[name="compound_id"]')) updateSelectionCount();
+  });
+  updateSelectionCount();
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();

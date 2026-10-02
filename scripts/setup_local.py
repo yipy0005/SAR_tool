@@ -43,8 +43,13 @@ DEFAULT_ENV_FILE = ROOT / "instance" / "local.env"
 DEFAULT_PROJECT_ID = "local_example_project"
 DEFAULT_EMAIL = "scientist@example.org"
 DEFAULT_PORT = 5001
-DEFAULT_DATASET = "druglike"
+DEFAULT_DATASET = "showcase"
 FIXTURE_SETS = {
+    "showcase": {
+        "project_name": "Synthetic showcase SAR series",
+        "primary": ROOT / "examples" / "example_showcase_measurements.csv",
+        "followup": ROOT / "examples" / "example_showcase_followup.csv",
+    },
     "druglike": {
         "project_name": "Synthetic drug-like SAR series",
         "primary": ROOT / "examples" / "example_druglike_measurements.csv",
@@ -89,17 +94,20 @@ def _prompt_email(default: str) -> str:
 
 def _prompt_dataset(default: str) -> str:
     print("Example dataset:")
-    print("  1) druglike — shared amide/pyridyl series with R-group diversity (recommended)")
-    print("  2) compact  — small smoke-test fixture")
+    print("  1) showcase — high-contrast potency/selectivity trend (recommended for demos)")
+    print("  2) druglike — shared amide/pyridyl series with broader R-group diversity")
+    print("  3) compact  — small smoke-test fixture")
     while True:
         value = input(f"Choose dataset [1/{default}] ").strip().lower()
         if not value:
             return default
-        if value in {"1", "druglike"}:
+        if value in {"1", "showcase"}:
+            return "showcase"
+        if value in {"2", "druglike"}:
             return "druglike"
-        if value in {"2", "compact"}:
+        if value in {"3", "compact"}:
             return "compact"
-        print("Choose 1 for druglike or 2 for compact.")
+        print("Choose 1 for showcase, 2 for druglike, or 3 for compact.")
 
 
 def _prompt_password(*, non_interactive: bool) -> str:
@@ -390,7 +398,9 @@ def _setup(args: argparse.Namespace) -> tuple[dict[str, str], str]:
         if int(existing_records) > 0:
             raise ValueError(
                 "--no-seed-example will not reuse a database that already contains scientific records; "
-                "choose a new --database and --upload-dir path to create a blank workspace."
+                "run 'pixi run start-local' to use the existing workspace, or choose new "
+                "--database, --upload-dir, and --env-file paths (for example, under instance/blank/) "
+                "to create a blank workspace."
             )
     project_name = fixture_set["project_name"] if seed_example else "Local project"
     project_description = None if seed_example else "Blank local project for importing real laboratory results."

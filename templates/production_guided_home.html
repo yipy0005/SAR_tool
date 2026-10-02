@@ -1,0 +1,47 @@
+{% if project and guidance %}
+{% set primary_href = url_for('production_workspace', view=guidance.primary_view, project_id=project.id) %}
+{% if guidance.primary_anchor %}{% set primary_href = primary_href ~ '#' ~ guidance.primary_anchor %}{% endif %}
+<section class="panel production-guided-home" aria-labelledby="productionGuidedHomeHeading">
+  <div class="production-guided-home__intro">
+    <div class="section-kicker">{{ guidance.kicker }}</div>
+    <h2 id="productionGuidedHomeHeading">{{ guidance.title }}</h2>
+    <p class="panel-subtitle">{{ guidance.description }}</p>
+  </div>
+  <div class="production-guided-home__next">
+    <div class="production-guided-home__next-meta">
+      <span class="status-badge status-badge--good">STEP {{ guidance.step }} · NEXT ACTION</span>
+      {% if guidance.step == '01' %}<span class="status-badge status-badge--neutral">No results saved yet</span>{% endif %}
+    </div>
+    <strong>{{ guidance.primary_label }}</strong>
+    <a class="button button--primary button--small" href="{{ primary_href }}">Open now <span aria-hidden="true">→</span></a>
+  </div>
+  <details class="production-guided-advanced production-guided-home__tasks" aria-label="Other workflow tasks">
+    <summary>Other workflow questions</summary>
+    <div class="production-guided-home__tasks-body">
+        <div class="production-guided-home__tasks-heading">
+        <div class="section-kicker">AVAILABLE WHEN NEEDED</div>
+        <p>Use these only when they are the next question for your project.</p>
+      </div>
+      <div class="production-guided-task-grid">
+      {% for goal in guidance.goals %}
+      {% if goal.ready %}
+      {% set goal_href = url_for('production_workspace', view=goal.view, project_id=project.id) %}
+      {% if goal.anchor %}{% set goal_href = goal_href ~ '#' ~ goal.anchor %}{% endif %}
+      <a class="production-guided-task production-guided-task--ready" href="{{ goal_href }}">
+        <strong>{{ goal.label }}</strong>
+        <span>{{ goal.description }}</span>
+        <small>{{ goal.status }} <span aria-hidden="true">→</span></small>
+      </a>
+      {% else %}
+      <div class="production-guided-task production-guided-task--locked" aria-disabled="true">
+        <strong>{{ goal.label }}</strong>
+        <span>{{ goal.description }}</span>
+        <small>{{ goal.status }}</small>
+      </div>
+      {% endif %}
+      {% endfor %}
+      </div>
+    </div>
+  </details>
+</section>
+{% endif %}

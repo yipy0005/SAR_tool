@@ -140,7 +140,7 @@ def test_rgroup_activity_cliff_and_design_candidate_apis(production_app):
     analysis_page = client.get(f"/workspace/analysis?project_id={project_id}")
     assert analysis_page.status_code == 200
     analysis_body = analysis_page.get_data(as_text=True)
-    assert "VERSIONED ANALYSIS" in analysis_body
+    assert "FIND PATTERNS" in analysis_body
     assert "SCAFFOLD / R-GROUP" in analysis_body
     assert "ACTIVITY CLIFFS" in analysis_body
 
@@ -233,3 +233,39 @@ def test_selectivity_analysis_api_persists_observed_assay_margins(production_app
     stored = client.get(f"/api/v1/analysis/selectivity/{payload['analysis_run_id']}")
     assert stored.status_code == 200
     assert stored.get_json()["input_selection"]["selection_policy"].startswith("latest_")
+
+
+def test_substituent_swap_api_uses_rgroup_sites(production_app):
+    client = production_app.test_client()
+    project_id, _measurement_ids = _seed_pair(client)
+    assert client.post(
+        "/api/v1/analysis/rgroup",
+        json={"project_id": project_id, "scaffold_smarts": "c1ccccc1"},
+    ).status_code == 201
+    compounds = client.get(f"/api/v1/compounds?project_id={project_id}").get_json()
+    records = compounds.get("compounds") or compounds.get("results") or []
+    toluene = next(item for item in records if item["registration_id"] == "CMP-B")
+    compound_id = toluene.get("id") or toluene.get("compound_id")
+
+    swapped = client.post(
+        "/api/v1/structure/replace-substituent",
+        json={"project_id": project_id, "compound_id": compound_id, "site": "R1", "replacement": "*C(F)(F)F"},
+    )
+    assert swapped.status_code == 200, swapped.get_json()
+    assert swapped.get_json()["result"]["isomeric_smiles"] == "FC(F)(F)c1ccccc1"
+
+    # Chained edit on the proposed SMILES, then an unknown site is rejected.
+    chained = client.post(
+        "/api/v1/structure/replace-substituent",
+        json={"project_id": project_id, "smiles": "FC(F)(F)c1ccccc1", "site": "R1", "replacement": "H"},
+    )
+    assert chained.get_json()["result"]["isomeric_smiles"] == "c1ccccc1"
+    rejected = client.post(
+        "/api/v1/structure/replace-substituent",
+        json={"project_id": project_id, "compound_id": compound_id, "site": "R9", "replacement": "*F"},
+    )
+    assert rejected.status_code == 422
+
+    analysis_html = client.get(f"/workspace/analysis?project_id={project_id}").get_data(as_text=True)
+    assert 'class="rgroup-site-head">R1' in analysis_html
+    assert "Method details" in analysis_html

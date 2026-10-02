@@ -37,21 +37,22 @@
     const value = summary?.value ?? summary?.summary_value;
     return typeof value === "number" && Number.isFinite(value) ? value : null;
   };
-  const formatValue = (value, digits = 2) => value === null ? "—" : Number(value).toFixed(digits).replace(/\.00$/, "");
+  const formatValue = (value, digits = 2) => value === null ? "—" : Number(value).toFixed(digits);
+  const displayUnit = (unit) => (window.SARFormat ? window.SARFormat.unit(unit) : String(unit || ""));
   const summaryLabel = (summary) => {
     if (!summary) return "No result";
     if (summary.summary_state && summary.summary_state !== "observed") return summary.summary_state.replaceAll("_", " ");
-    const qualifier = summary.summary_qualifier && summary.summary_qualifier !== "=" ? ` ${summary.summary_qualifier}` : "";
-    return `${formatValue(numericValue(summary))}${qualifier}`;
+    const qualifier = summary.summary_qualifier && summary.summary_qualifier !== "=" ? `${summary.summary_qualifier} ` : "";
+    return `${qualifier}${formatValue(numericValue(summary))}`;
   };
   const rawIc50For = (compound) => measurements.find(
     (measurement) => measurement.registration_id === compound.registration_id && measurement.assay_name === "IC50" && measurement.raw_value_text,
   );
   const rawIc50Label = (compound, summary) => {
     const measurement = rawIc50For(compound);
-    if (!measurement) return `${summaryLabel(summary)} ${summary?.unit || ""}`.trim();
+    if (!measurement) return `${summaryLabel(summary)} ${displayUnit(summary?.unit)}`.trim();
     const qualifier = measurement.qualifier && measurement.qualifier !== "=" ? `${measurement.qualifier} ` : "";
-    return `${qualifier}${measurement.raw_value_text} ${measurement.unit_ucum || ""}`.trim();
+    return `${qualifier}${measurement.raw_value_text} ${displayUnit(measurement.unit_ucum)}`.trim();
   };
   const series = Array.isArray(data.series) ? data.series : [];
   const compoundSeries = data.compoundSeries && typeof data.compoundSeries === "object" ? data.compoundSeries : {};
@@ -84,7 +85,7 @@
       <div class="compound-signal__label">${escapeHtml(label)}</div>
       <strong>${escapeHtml(summaryLabel(summary))}</strong>
       ${potencyBar(summary)}
-      <small>${summary ? escapeHtml(summary.unit || summary.canonical_unit || "") : "awaiting assay"}</small>
+      <small>${summary ? escapeHtml(displayUnit(summary.unit || summary.canonical_unit || "")) : "awaiting assay"}</small>
     </div>`;
 
   const structureHtml = (compound) => {

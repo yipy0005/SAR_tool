@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from rdkit import Chem
+from rdkit import Chem, rdBase
 from rdkit.Chem import Draw
 
 
@@ -278,3 +278,216 @@ def standardize_structure(
         warnings=tuple(warnings),
         rendered_svg=_render_svg(molecule),
     )
+
+
+def _strip_svg_prolog(svg: str) -> str:
+    start = svg.find("<svg")
+    return svg[start:] if start >= 0 else svg
+
+
+def render_scaffold_positions_svg(
+    scaffold_smiles: str,
+    positions: list[tuple[int, str]],
+    *,
+    width: int = 360,
+    height: int = 200,
+) -> str:
+    """Draw a Murcko scaffold with an R-label on each observed attachment atom.
+
+    ``positions`` pairs scaffold atom indices (from ``Chem.MolFromSmiles(scaffold_smiles)``)
+    with labels such as ``"R1"``. Labels are presentation-only.
+    """
+    with rdBase.BlockLogs():
+        scaffold = Chem.MolFromSmiles(scaffold_smiles)
+        query_core = scaffold is None
+        if query_core:
+            # A declared or drawn core is SMARTS (for example [#6]1:[#6]...); draw the query itself.
+            scaffold = Chem.MolFromSmarts(scaffold_smiles)
+    if scaffold is None:
+        raise StructureValidationError("Scaffold could not be parsed", "parse_failed")
+    if query_core:
+        scaffold.UpdatePropertyCache(strict=False)
+        Chem.FastFindRings(scaffold)
+    editable = Chem.RWMol(scaffold)
+    labels: dict[int, str] = {}
+    for atom_index, label in positions:
+        if atom_index < 0 or atom_index >= scaffold.GetNumAtoms():
+            continue
+        dummy_index = editable.AddAtom(Chem.Atom(0))
+        editable.AddBond(atom_index, dummy_index, Chem.BondType.SINGLE)
+        labels[dummy_index] = label
+    molecule = editable.GetMol()
+    if query_core:
+        molecule.UpdatePropertyCache(strict=False)
+        Chem.FastFindRings(molecule)
+    else:
+        try:
+            Chem.SanitizeMol(molecule)
+        except Exception:  # Fall back to the bare scaffold when a label cannot be attached.
+            molecule = scaffold
+            labels = {}
+    drawer = Draw.MolDraw2DSVG(width, height)
+    options = drawer.drawOptions()
+    for atom_index, label in labels.items():
+        options.atomLabels[atom_index] = label
+    drawer.DrawMolecule(molecule)
+    drawer.FinishDrawing()
+    return _strip_svg_prolog(drawer.GetDrawingText()).replace(
+        "<svg", f'<svg role="img" aria-label="Shared scaffold with positions {", ".join(label for _i, label in positions)}"', 1
+    )
+
+
+def render_fragment_svg(attached_smiles: str, label: str = "R", *, width: int = 130, height: int = 80) -> str:
+    """Small drawing of a substituent; the dummy atom is labelled with its position."""
+    molecule = Chem.MolFromSmiles(attached_smiles)
+    if molecule is None:
+        return ""
+    drawer = Draw.MolDraw2DSVG(width, height)
+    options = drawer.drawOptions()
+    options.padding = 0.12
+    for atom in molecule.GetAtoms():
+        if atom.GetAtomicNum() == 0:
+            options.atomLabels[atom.GetIdx()] = label
+    drawer.DrawMolecule(molecule)
+    drawer.FinishDrawing()
+    return _strip_svg_prolog(drawer.GetDrawingText())
+
+
+def _draw_reference_positions(
+    reference_smiles: str,
+    scaffold_smarts: str,
+    positions: list[tuple[int, str]],
+    width: int,
+    height: int,
+) -> tuple[str, dict[int, tuple[float, float]], dict[int, str]]:
+    """Draw the reference with its R-site atoms highlighted.
+
+    Returns the SVG, the drawing coordinates of each labelled atom, and the
+    label for each atom. Shared by the static R-site map and the interactive
+    explorer so both put a site on exactly the same atom.
+    """
+    molecule = Chem.MolFromSmiles(str(reference_smiles))
+    scaffold = Chem.MolFromSmarts(str(scaffold_smarts))
+    if molecule is None or scaffold is None:
+        raise StructureValidationError("Reference or scaffold could not be parsed", "parse_failed")
+    match = molecule.GetSubstructMatch(scaffold)
+    if not match:
+        raise StructureValidationError("Reference does not contain the declared scaffold", "scaffold_not_found")
+    labels: dict[int, str] = {}
+    highlight_atoms: list[int] = []
+    for scaffold_index, label in positions:
+        if 0 <= scaffold_index < len(match):
+            molecule_index = match[scaffold_index]
+            labels[molecule_index] = label
+            highlight_atoms.append(molecule_index)
+    drawer = Draw.MolDraw2DSVG(width, height)
+    options = drawer.drawOptions()
+    options.addStereoAnnotation = True
+    highlight_colors = {index: (0.32, 0.60, 0.78) for index in highlight_atoms}
+    drawer.DrawMolecule(
+        molecule,
+        highlightAtoms=sorted(set(highlight_atoms)),
+        highlightAtomColors=highlight_colors,
+    )
+    points = {}
+    for atom_index in labels:
+        point = drawer.GetDrawCoords(atom_index)
+        points[atom_index] = (float(point.x), float(point.y))
+    drawer.FinishDrawing()
+    return _strip_svg_prolog(drawer.GetDrawingText()), points, labels
+
+
+def render_reference_positions_svg(
+    reference_smiles: str,
+    scaffold_smarts: str,
+    positions: list[tuple[int, str]],
+    *,
+    width: int = 760,
+    height: int = 300,
+) -> str:
+    """Render the full reference molecule and label scaffold attachment atoms.
+
+    Unlike a bare scaffold drawing, this keeps the actual reference structure
+    visible and places R labels on the matched scaffold atoms. It accepts
+    SMARTS (including query atoms from an MCS) and never invents a substituent
+    structure. Labels are presentation-only.
+    """
+    svg, points, labels = _draw_reference_positions(reference_smiles, scaffold_smarts, positions, width, height)
+    labels_text = ", ".join(label for _index, label in positions)
+    callouts = "".join(
+        f'<text x="{x:.1f}" y="{y - 18:.1f}" text-anchor="middle" '
+        f'font-family="sans-serif" font-size="18" font-weight="700" '
+        f'fill="#82c9ff" stroke="#071016" stroke-width="5" paint-order="stroke">{labels[atom_index]}</text>'
+        for atom_index, (x, y) in points.items()
+    )
+    svg = svg.replace("</svg>", f"{callouts}</svg>", 1)
+    return svg.replace(
+        "<svg",
+        f'<svg role="img" aria-label="Reference structure with R positions {labels_text}"',
+        1,
+    )
+
+
+MATCH_HIGHLIGHT_COLOUR = (1.0, 0.71, 0.45)
+
+
+def render_match_svg(
+    molecule: Chem.Mol,
+    match_atoms: list[int] | tuple[int, ...],
+    query: Chem.Mol | None = None,
+    *,
+    width: int = 260,
+    height: int = 150,
+) -> str:
+    """Draw a compound with the atoms and bonds of one substructure match highlighted.
+
+    Bonds are highlighted only when both ends belong to the match and the
+    query has a bond between the corresponding query atoms, so a ring closure
+    outside the drawn query is not shown as matched.
+    """
+    atoms = [int(index) for index in match_atoms]
+    bonds: list[int] = []
+    if query is not None and len(atoms) == query.GetNumAtoms():
+        for bond in query.GetBonds():
+            target = molecule.GetBondBetweenAtoms(atoms[bond.GetBeginAtomIdx()], atoms[bond.GetEndAtomIdx()])
+            if target is not None:
+                bonds.append(target.GetIdx())
+    drawer = Draw.MolDraw2DSVG(width, height)
+    drawer.DrawMolecule(
+        molecule,
+        highlightAtoms=atoms,
+        highlightBonds=bonds,
+        highlightAtomColors={index: MATCH_HIGHLIGHT_COLOUR for index in atoms},
+        highlightBondColors={index: MATCH_HIGHLIGHT_COLOUR for index in bonds},
+    )
+    drawer.FinishDrawing()
+    return _strip_svg_prolog(drawer.GetDrawingText())
+
+
+def reference_site_map(
+    reference_smiles: str,
+    scaffold_smarts: str,
+    positions: list[tuple[int, str]],
+    *,
+    width: int = 520,
+    height: int = 260,
+) -> dict[str, Any]:
+    """Reference drawing plus the fractional position of each R-site atom.
+
+    The interactive explorer overlays one keyboard-focusable button per site at
+    ``(x, y)`` (0–1 of the drawing's width and height), so the SVG itself has
+    no text callouts. Coordinates come from RDKit's own layout.
+    """
+    svg, points, labels = _draw_reference_positions(reference_smiles, scaffold_smarts, positions, width, height)
+    labels_text = ", ".join(label for _index, label in positions)
+    svg = svg.replace(
+        "<svg",
+        f'<svg role="img" aria-label="Reference structure with R-sites {labels_text}"',
+        1,
+    )
+    sites = [
+        {"label": labels[atom_index], "x": round(x / width, 4), "y": round(y / height, 4)}
+        for atom_index, (x, y) in points.items()
+    ]
+    sites.sort(key=lambda site: (len(site["label"]), site["label"]))
+    return {"svg": svg, "width": width, "height": height, "sites": sites}

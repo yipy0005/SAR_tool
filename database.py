@@ -31,6 +31,8 @@ REQUIRED_SCIENTIFIC_TABLES = (
     "series_memberships",
     "prediction_models",
     "prediction_observations",
+    "compound_relationships",
+    "pharmacophore_rgroup_assignments",
 )
 POSTGRES_MIGRATION_LOCK_KEY = 753104534946
 

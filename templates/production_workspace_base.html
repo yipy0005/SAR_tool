@@ -1,29 +1,34 @@
 {% set page_titles = {
-  "overview": ("Start", "Add and check a lab results file"),
-  "explore": ("Compare", "Compare results from one or two lab tests"),
-  "evidence": ("Check results", "See what was uploaded and what the workbench calculated"),
-  "analysis": ("Find patterns", "Review calculated views without changing the source results"),
-  "designs": ("Choose next", "Review questions and proposed experiments before deciding"),
+  "overview": ("Start", "SAR table for every compound and endpoint"),
+  "evidence": ("Check results", "Uploaded values, units, qualifiers, and source rows"),
+  "summaries": ("Build summaries", "Replicate-aware summaries per compound and assay"),
+  "explore": ("Compare", "Two assays side by side for the same compounds"),
+  "analysis": ("Find patterns", "R-groups, matched pairs, cliffs, selectivity, and ADME"),
+  "designs": ("Choose next", "Questions and proposed compounds for review"),
+  "sar": ("SAR series", "Scaffold series with substituents and observed effects"),
   "new": ("New project", "Start a blank project without changing existing results"),
   "legacy": ("Production dashboard", "Compatibility view for the previous consolidated workspace"),
 } %}
 {% set current_title = page_titles.get(page_view, ("Production workspace", "Project-scoped scientific evidence")) %}
-{% set journey_steps = {
-  "overview": ("01", "Start", "Add and check your lab results", "Choose a file to preview"),
-  "evidence": ("02", "Check results", "See exactly what was uploaded", "Review the uploaded rows"),
-  "explore": ("03", "Compare", "Compare results from one or two tests", "Choose the tests to compare"),
-  "analysis": ("04", "Find patterns", "Look for useful signals in compatible results", "Read the recommended pattern checks"),
-  "designs": ("05", "Choose next", "Turn evidence gaps into reviewable experiments", "Review the suggested questions")
-} %}
-{% set current_step = journey_steps.get(page_view, ("", current_title[0], current_title[1], "Return to Start")) %}
 {% set has_project_data = counts is defined and counts and counts.measurements|default(0) > 0 %}
+{% set nav_pages = [
+  ("overview", "Start", "SAR table"),
+  ("evidence", "Check results", "Source data"),
+  ("summaries", "Build summaries", "Group repeats"),
+  ("explore", "Compare", "Two assays"),
+  ("sar", "SAR series", "Scaffold series"),
+  ("analysis", "Find patterns", "Calculated views"),
+  ("designs", "Choose next", "Next question")
+] %}
 {% set page_chemistry_reasons = {
-  "overview": "Chemistry starts with traceable lab data: preserving the original file lets us separate what was measured from what is calculated later.",
-  "evidence": "Chemical interpretation depends on identity, units, qualifiers, and source rows being correct before values are compared.",
-  "explore": "Comparing the same compounds across compatible tests helps distinguish a structural potency signal from assay or cell context.",
-  "analysis": "Pattern checks turn compatible measurements into structure–activity questions while keeping calculated observations separate from experiments.",
-  "designs": "A useful next experiment changes a molecule or test condition for a reason tied to evidence and uncertainty.",
-  "new": "A separate project keeps chemical series, assay context, and provenance from different programs from being mixed."
+  "overview": "Every cell is the latest versioned summary for one compound and assay. Exact values, thresholds (> / <), and missing results stay distinct; colour shading is display-only and never changes a value.",
+  "evidence": "Structure identity, assay context, units, and qualifiers determine whether a measured value can support a medicinal-chemistry conclusion.",
+  "summaries": "Replicate-aware summaries make compatible results easier to compare without replacing the original measurements or their censoring.",
+  "explore": "Side-by-side tests can reveal selectivity, cell-context effects, or assay-specific behavior only when units, directions, and source states remain compatible.",
+  "analysis": "Pattern analysis can prioritize a question, but it cannot distinguish cause from correlation or replace qualified scientific review.",
+  "designs": "Separating observations, suggestions, hypotheses, and untested designs keeps the next synthesis or assay tied to an explicit uncertainty.",
+  "sar": "Series are built from validated structures and compatible observed summaries. Substituent effects are observed associations, not causal proof or predictions for unmeasured molecules.",
+  "new": "Separate project boundaries prevent compounds, assay conditions, and SAR conclusions from different chemical series or programs being combined accidentally."
 } %}
 <!doctype html>
 <html lang="en">
@@ -32,12 +37,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ project.name if project else 'SAR Workbench' }} · {{ current_title[0] }}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
+    <script src="{{ url_for('static', filename='theme.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    {% if page_view in ['overview', 'designs'] %}<script src="{{ url_for('static', filename='production.js') }}" defer></script>{% endif %}
-    {% if page_view == 'overview' %}<script src="{{ url_for('static', filename='production_visual.js') }}" defer></script><script src="{{ url_for('static', filename='production_series.js') }}" defer></script>{% endif %}
+    <script src="{{ url_for('static', filename='sar_format.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='production_guidance.js') }}" defer></script>
+    {% if project %}<script src="{{ url_for('static', filename='structure_sketcher.js') }}" defer></script><script src="{{ url_for('static', filename='structure_search.js') }}" defer></script>{% endif %}
+    {% if page_view in ['overview', 'analysis', 'designs'] %}<script src="{{ url_for('static', filename='production.js') }}" defer></script>{% endif %}
+    {% if page_view == 'overview' %}<script src="{{ url_for('static', filename='production_visual.js') }}" defer></script><script src="{{ url_for('static', filename='production_series.js') }}" defer></script><script src="{{ url_for('static', filename='production_matrix.js') }}" defer></script>{% endif %}
+    {% if page_view == 'summaries' %}<script src="{{ url_for('static', filename='production_summaries.js') }}" defer></script>{% endif %}
+    {% if page_view in ['evidence', 'summaries'] %}<script src="{{ url_for('static', filename='production_tables.js') }}" defer></script>{% endif %}
     {% if page_view == 'explore' %}<script src="{{ url_for('static', filename='production_explorer.js') }}" defer></script>{% endif %}
-    {% if page_view == 'analysis' %}<script src="{{ url_for('static', filename='production_prediction.js') }}" defer></script>{% endif %}
+    {% if page_view == 'analysis' %}<script src="{{ url_for('static', filename='production_prediction.js') }}" defer></script><script src="{{ url_for('static', filename='production_patterns.js') }}" defer></script>{% endif %}
     {% if page_view == 'designs' %}<script src="{{ url_for('static', filename='production_designs.js') }}" defer></script>{% endif %}
+    {% if page_view == 'sar' %}<script src="{{ url_for('static', filename='production_sar.js') }}" defer></script>{% endif %}
     {% block head_scripts %}{% endblock %}
   </head>
   <body>
@@ -46,54 +58,55 @@
       <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v5M12 8h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
       <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6.4L5.4 17a2.2 2.2 0 0 0 1.8 3.5h9.6a2.2 2.2 0 0 0 1.8-3.5L14 9.4V3M8 15h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     </svg>
-    <main class="page-content production-workspace" data-production-project="{{ project.id if project else '' }}">
-      <div class="demo-ribbon" style="border-color: rgba(141,228,187,.25); background: rgba(141,228,187,.06);">
+    <main class="page-content production-workspace" data-production-project="{{ project.id if project else '' }}" data-page-view="{{ page_view }}">
+      <div class="demo-ribbon production-ribbon">
         <svg class="icon icon--tiny" aria-hidden="true"><use href="#i-check"></use></svg>
         Production data boundary · imported records only · no illustrative fallback
       </div>
       <section class="page-intro production-workspace-intro">
         <div>
-          <div class="eyebrow">PRODUCTION DATA WORKSPACE <span class="eyebrow-rule"></span> {{ current_title[0] }} · {{ project.status if project else 'Awaiting data' }}</div>
+          <div class="eyebrow">{{ current_title[0] }} <span class="eyebrow-rule"></span> {{ project.status if project else 'Awaiting data' }}</div>
           <h1>{{ project.name if project else 'Create a project to begin.' }}</h1>
-          <p class="intro-copy">{{ current_title[1] }}. Follow the numbered steps below. Original lab values stay separate from calculated summaries and review prompts.</p>
-          {% if page_chemistry_reasons.get(page_view) %}<p class="chemistry-why"><strong>Why in chemistry</strong>{{ page_chemistry_reasons[page_view] }}</p>{% endif %}
+          <p class="intro-copy">{{ current_title[1] }}. Original lab values stay separate from calculated summaries.</p>
         </div>
-        <div class="page-actions">
-          <a class="button button--primary" href="{{ url_for('production_new_project') }}">New project</a>
-          <a class="button button--secondary" href="/api/v1/readyz">Readiness</a>
-          <a class="button button--secondary" href="/api/v1/projects">Project API</a>
+        <div class="page-actions production-workspace-head-actions">
+          {% if project %}<button class="button button--secondary" type="button" data-structure-search-open aria-haspopup="dialog" aria-controls="structureSearchDialog">Find by structure</button>{% endif %}
+          <details class="production-more-tools production-more-tools--header">
+            <summary class="button button--secondary">More tools</summary>
+            <div class="production-more-tools__menu">
+              <a class="button button--secondary" href="{{ url_for('production_new_project') }}">New project</a>
+              {% if project %}<a class="button button--secondary" href="/api/v1/exports/project/{{ project.id }}?format=csv">Download CSV export</a><a class="button button--secondary" href="{{ url_for('legacy_production_dashboard', project_id=project.id) }}">Legacy dashboard</a>{% endif %}
+              <a class="button button--secondary" href="/api/v1/readyz">Readiness</a>
+              <a class="button button--secondary" href="/api/v1/projects">Project API</a>
+            </div>
+          </details>
+          <button class="button button--secondary" type="button" data-theme-toggle aria-pressed="false">Light theme</button>
+          <button id="productionModeToggle" class="button button--secondary" type="button" aria-pressed="false">Use expert view</button>
           <form method="post" action="/logout"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="button button--secondary" type="submit">Sign out</button></form>
         </div>
       </section>
       {% if project %}
       <nav class="production-workspace-nav" aria-label="Production workspace steps">
-        {% for page, label, description in [
-          ("overview", "Start", "Add and check a file"),
-          ("evidence", "Check results", "See what was uploaded"),
-          ("explore", "Compare", "Compare tests side by side"),
-          ("analysis", "Find patterns", "Look for useful signals"),
-          ("designs", "Choose next", "Review next experiments")
-        ] %}
+        {% for page, label, description in nav_pages %}
         <a class="production-workspace-nav__link{% if page_view == page %} is-active{% endif %}" href="{{ url_for('production_workspace', view=page, project_id=project.id) }}"{% if page_view == page %} aria-current="page"{% endif %} aria-label="{{ label }}: {{ description }}">
           <span class="production-workspace-nav__step">{{ "%02d"|format(loop.index) }}</span>
           <span class="production-workspace-nav__text"><span class="production-workspace-nav__label">{{ label }}</span><span class="production-workspace-nav__description">{{ description }}</span></span>
         </a>
         {% endfor %}
       </nav>
-      <section class="production-orientation" aria-label="Where you are in the workflow">
-        <div class="production-orientation__current">
-          <span class="section-kicker">YOU ARE HERE · STEP {{ current_step[0] }}</span>
-          <h2>{{ current_step[1] }}</h2>
-          <p>{{ current_step[2] }}</p>
+      {% endif %}
+      {% if page_view == 'overview' and guidance is defined and guidance and not has_project_data %}{% set about_reason = guidance.reason %}{% else %}{% set about_reason = page_chemistry_reasons.get(page_view) %}{% endif %}
+      {% if about_reason %}
+      <details class="production-about" id="productionAbout">
+        <summary>About this page</summary>
+        <div class="production-about__body">
+          <p class="chemistry-why">{{ about_reason }}</p>
+          {% block about %}{% endblock %}
         </div>
-        <div class="production-orientation__next">
-          <span class="section-kicker">NEXT</span>
-          <strong>{% if page_view == 'overview' and has_project_data %}Review your uploaded results{% else %}{{ current_step[3] }}{% endif %}</strong>
-          {% if page_view == 'overview' and has_project_data %}<a href="{{ url_for('production_workspace', view='evidence', project_id=project.id) }}">Open Check results <span aria-hidden="true">→</span></a>{% elif page_view == 'overview' %}<a href="#production-actions">Choose a file <span aria-hidden="true">→</span></a>{% elif page_view == 'evidence' %}<a href="{{ url_for('production_workspace', view='explore', project_id=project.id) }}">Open Compare <span aria-hidden="true">→</span></a>{% elif page_view == 'explore' %}<a href="{{ url_for('production_workspace', view='analysis', project_id=project.id) }}">Open Find patterns <span aria-hidden="true">→</span></a>{% elif page_view == 'analysis' %}<a href="{{ url_for('production_workspace', view='designs', project_id=project.id) }}">Open Choose next <span aria-hidden="true">→</span></a>{% endif %}
-        </div>
-      </section>
+      </details>
       {% endif %}
       {% block content %}{% endblock %}
+      {% if project %}{% include "_structure_search.html" %}{% endif %}
     </main>
   </body>
 </html>

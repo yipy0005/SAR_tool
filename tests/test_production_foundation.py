@@ -125,16 +125,16 @@ def test_invalid_only_import_cannot_commit(production_app):
 
 def test_migrations_are_idempotent_and_backup_is_restorable(tmp_path):
     database_path = str(tmp_path / "source.db")
-    assert apply_migrations(database_path) == 19
-    assert apply_migrations(database_path) == 19
+    assert apply_migrations(database_path) == 22
+    assert apply_migrations(database_path) == 22
     backup_path = str(tmp_path / "backup.db")
     backup_database(database_path, backup_path)
     verification = verify_backup(backup_path)
-    assert verification == {"schema_version": 19, "scientific_tables": 18, "integrity": "ok"}
+    assert verification == {"schema_version": 22, "scientific_tables": 20, "integrity": "ok"}
 
     connection = sqlite3.connect(backup_path)
     try:
-        assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 19
+        assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 22
         assert connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='measurements'").fetchone()
     finally:
         connection.close()

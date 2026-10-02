@@ -1,0 +1,66 @@
+{# Find by structure: one dialog per workspace page. Opened by any [data-structure-search-open] button.
+   static/structure_sketcher.js draws the query; static/structure_search.js runs it. Nothing is saved. #}
+<dialog class="structure-search" id="structureSearchDialog" aria-labelledby="structureSearchHeading" data-structure-search data-project-id="{{ project.id }}"{% if ketcher.available %} data-ketcher-url="{{ ketcher.url }}?disableMacromoleculesEditor=true"{% endif %} data-links='{{ {"sar": url_for("production_workspace", view="sar", project_id=project.id), "analysis": url_for("production_workspace", view="analysis", project_id=project.id)} | tojson }}'>
+  <div class="structure-search__frame">
+    <header class="structure-search__header">
+      <div>
+        <div class="section-kicker">FIND BY STRUCTURE <span class="status-badge status-badge--good">derived</span></div>
+        <h2 id="structureSearchHeading">Draw a substructure to find compounds</h2>
+        <p class="panel-subtitle">Every compound in this project that contains the drawn or typed substructure is listed with the match highlighted. Use a result as a reference without leaving this window. Nothing is saved.</p>
+      </div>
+      <button type="button" class="button button--secondary button--small" data-structure-close>Close</button>
+    </header>
+    <div class="structure-search__body">
+      <div class="structure-search__draw">
+        {% if ketcher.available %}
+        <div class="structure-search__editors" role="group" aria-label="Structure editor">
+          <button type="button" class="structure-search__editor-tab" data-structure-editor="ketcher" aria-pressed="true">Ketcher</button>
+          <button type="button" class="structure-search__editor-tab" data-structure-editor="simple" aria-pressed="false">Simple sketcher</button>
+          <span class="structure-search__editor-note">Ketcher {{ ketcher.version }} · EPAM Systems · <a href="{{ ketcher.license_url }}" target="_blank" rel="noopener">Apache-2.0 licence</a></span>
+        </div>
+        <div class="structure-search__ketcher" data-structure-ketcher>
+          <iframe title="Ketcher structure editor" data-ketcher-frame></iframe>
+          <p class="structure-search__ketcher-status" data-ketcher-status aria-live="polite">Loading Ketcher…</p>
+        </div>
+        {% endif %}
+        <div class="structure-search__sketcher" data-structure-sketcher{% if ketcher.available %} hidden{% endif %}></div>
+        {% if not ketcher.available %}<p class="structure-search__editor-note">Using the built-in sketcher. For stereo, R-group labels and atom lists, install the Ketcher editor on this server with <code>pixi run fetch-ketcher</code>.</p>{% endif %}
+      </div>
+      <div class="structure-search__side">
+        <label class="structure-search__field">Or type SMILES / SMARTS
+          <input type="text" data-structure-text spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="e.g. Clc1ccccc1 or [N;H1]C=O" aria-describedby="structureSearchTextHelp">
+        </label>
+        <div class="structure-search__row">
+          <label class="structure-search__field structure-search__field--inline">Read as
+            <select data-structure-format><option value="auto">Auto-detect</option><option value="smiles">SMILES</option><option value="smarts">SMARTS</option></select>
+          </label>
+          <button type="button" class="button button--secondary button--small" data-structure-draw-text>Draw typed SMILES</button>
+        </div>
+        <p class="structure-search__help" id="structureSearchTextHelp">Press Enter to search the typed text. The most recently edited input (drawing or text) is searched.</p>
+        <label class="structure-search__field">Start from a compound
+          <select data-structure-compound><option value="">Choose a compound</option>{% for compound in compounds | sort(attribute='registration_id') %}<option value="{{ compound.id }}">{{ compound.registration_id }}</option>{% endfor %}</select>
+        </label>
+        <div class="structure-search__row">
+          <button type="button" class="button button--secondary button--small" data-structure-load="molecule">Load molecule</button>
+          <button type="button" class="button button--secondary button--small" data-structure-load="scaffold">Load ring scaffold</button>
+        </div>
+        <details class="structure-search__rules">
+          <summary>How queries are read</summary>
+          <ul>
+            <li>Drawn atoms fix the element, not the number of hydrogens. Draw an H to require one.</li>
+            <li><b>A</b> any heavy atom · <b>Q</b> any heteroatom · <b>*</b> any atom or attachment point.</li>
+            <li>A drawn Kekulé ring matches aromatic rings; the dashed <b>any</b> bond matches every bond order.</li>
+            {% if ketcher.available %}<li>In Ketcher, an R-group label (R1, R2…) means any substituent, and atom lists such as [F,Cl] or query properties set on an atom are searched as drawn.</li>{% endif %}
+            <li>Stereochemistry is not compared.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <div class="structure-search__actions">
+      <button type="button" class="button button--primary" data-structure-use-drawing hidden></button>
+      <button type="button" class="button button--primary" data-structure-run>Find compounds</button>
+      <p class="structure-search__status" role="status" aria-live="polite" data-structure-status></p>
+    </div>
+    <section class="structure-search__results" data-structure-results aria-label="Matching compounds" hidden></section>
+  </div>
+</dialog>

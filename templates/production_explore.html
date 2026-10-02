@@ -1,23 +1,24 @@
 {% extends "production_workspace_base.html" %}
-{% block content %}
-{% if project %}
-<section class="production-page-heading"><div><div class="section-kicker">COMPARE · INTERACTIVE VIEW</div><h2>Compare lab results</h2><p class="panel-subtitle">Choose one test first. Add a second when you want to see whether the same compounds behave differently. Every comparison can be traced back to Check results.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Comparing matched compounds across tests can reveal selectivity, cellular translation, or assay-context effects that a single endpoint cannot show.</p></div><div class="page-actions"><a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='evidence', project_id=project.id) }}">Open Check results</a><a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='analysis', project_id=project.id) }}">Open Find patterns</a></div></section>
+{% block about %}
 <section class="production-reading-guide" aria-label="How to read Compare">
-  <div><strong>Test/result type</strong><span>One kind of lab result, such as a binding or cell test.</span><em>Technical label in this workspace: endpoint.</em></div>
+  <div><strong>Assay</strong><span>One endpoint, such as a biochemical IC50 or a cell assay.</span><em>Only saved, compatible summaries are offered.</em></div>
   <div><strong>Why choose two?</strong><span>To compare the same compounds under two test conditions.</span><em>The workbench only compares compatible units and directions.</em></div>
   <div><strong>What the states mean</strong><span>Missing means no value. Censored means a threshold, not an exact value.</span><em>Review means inspect the source before relying on the comparison.</em></div>
 </section>
+{% endblock %}
+{% block content %}
+{% if project %}
+<section class="production-focus-heading" aria-labelledby="productionExploreHeading"><div><div class="section-kicker">COMPARE</div><h2 id="productionExploreHeading">Compare compatible tests</h2><p class="panel-subtitle">Choose the tests, narrow the compound list, compare exact results, and check the linked source evidence one stage at a time.</p></div><span id="productionExplorerStatus" class="status-badge status-badge--good">loading stage…</span></section>
 {% if not measurements %}
 <section class="panel production-page-guide" aria-labelledby="exploreStartHeading">
-  <div class="production-page-guide__copy"><div class="section-kicker">COMPARE STARTS AFTER CHECK RESULTS</div><h2 id="exploreStartHeading">Save results before comparing tests</h2><p class="panel-subtitle">Start on Start, check the file, save accepted results, then return here. A comparison is only useful when it points to real uploaded evidence.</p><p class="chemistry-why"><strong>Why in chemistry</strong>A comparison without saved identities and assay context cannot tell whether a difference belongs to the molecule, the test, or a data-entry issue.</p></div>
+  <div class="production-page-guide__copy"><div class="section-kicker">COMPARE STARTS AFTER CHECK RESULTS</div><h2 id="exploreStartHeading">Save results before comparing tests</h2><p class="panel-subtitle">Start on Start, check the file, save accepted results, then return here. A comparison is only useful when it points to real uploaded evidence.</p></div>
   <a class="button button--primary button--small" href="{{ url_for('production_workspace', view='overview', project_id=project.id) }}#production-actions">Go to Start</a>
 </section>
 {% endif %}
 <script id="productionVisualData" type="application/json">{{ {"compounds": compounds, "measurements": measurements, "summaries": measurement_summaries, "rgroupAssignments": rgroup_assignments, "activityCliffs": activity_cliffs, "mmp": mmp_run, "scaffoldSvg": scaffold_svg, "selectivity": selectivity_observations, "translation": translation_observations, "adme": adme_observations, "properties": property_profiles, "pareto": pareto_observations, "contradictions": contradiction_observations, "designCandidates": design_candidates, "hypotheses": hypotheses, "recommendations": recommendations}|tojson }}</script>
 <section class="panel production-explorer" id="sar-explorer">
   <div class="panel-header production-explorer__header">
-    <div><div class="section-kicker">COMPARE WORKSPACE <span class="production-technical-label">SAR exploration studio</span></div><h2>Choose → narrow → compare → check</h2><p class="panel-subtitle">Choose a test, narrow the compounds, compare the results, then open the linked source evidence. The view never turns a comparison into proof.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Narrowing to comparable compounds and endpoints reduces apples-to-oranges comparisons, then sends you back to the source before you trust a trend.</p></div>
-    <span id="productionExplorerStatus" class="status-badge status-badge--good">loading tests…</span>
+    <div><div class="section-kicker">COMPARE WORKSPACE</div><h2>Choose → narrow → compare → check</h2><p class="panel-subtitle">Choose a test, narrow the compounds, compare the results, then open the linked source evidence. The view never turns a comparison into proof.</p></div>
   </div>
   <div class="production-explorer__body">
     <ol class="production-explorer-steps" aria-label="Comparison workflow">
@@ -28,30 +29,36 @@
       <li><button type="button" data-explorer-step="evidence"><span>5</span>Check source</button></li>
     </ol>
     <div class="production-explorer-controls">
-      <label class="production-explorer-control"><span>Test/result A <em>endpoint</em></span><select id="productionEndpointA"></select><small id="productionEndpointAMeta">Choose a test/result type</small></label>
-      <label class="production-explorer-control"><span>Test/result B <em>optional</em></span><select id="productionEndpointB"></select><small id="productionEndpointBMeta">Add a compatible test to compare</small></label>
-      <label class="production-explorer-control"><span>Which compounds to show</span><select id="productionExplorerCoverage"><option value="all">All compounds</option><option value="endpoint-a">Have a result for test A</option><option value="both">Have results for both tests</option><option value="review">Need source review</option></select><small>Missing and threshold results remain visible instead of being filled in.</small></label>
+      <label class="production-explorer-control"><span>Assay A</span><select id="productionEndpointA"></select><small id="productionEndpointAMeta">Choose an assay</small></label>
+      <label class="production-explorer-control"><span>Assay B <em>optional</em></span><select id="productionEndpointB"></select><small id="productionEndpointBMeta">Add a compatible assay to compare</small></label>
+      <label class="production-explorer-control"><span>Which compounds to show</span><select id="productionExplorerCoverage"><option value="all">All compounds</option><option value="endpoint-a">Have a result for assay A</option><option value="both">Have results for both assays</option><option value="review">Need source review</option></select><small>Missing and threshold results remain visible instead of being filled in.</small></label>
       <label class="production-explorer-control production-explorer-control--search"><span>Find a compound</span><input id="productionExplorerSearch" type="search" placeholder="Compound ID" autocomplete="off"><small>Search stays within this project.</small></label>
     </div>
-    <p class="chemistry-why"><strong>Why in chemistry</strong>Endpoint choice defines what biological question the numbers answer; filtering keeps the comparison interpretable without hiding missing or censored evidence.</p>
     <div class="production-explorer-action-row">
       <div id="productionExplorerMessage" class="production-explorer-message" role="status" aria-live="polite">Preparing comparison views…</div>
       <div class="page-actions">
         <button id="productionExplorerBack" class="button button--secondary button--small" type="button">Back</button>
         <button id="productionExplorerNext" class="button button--primary button--small" type="button">Next: narrow list</button>
-        <button id="productionExplorerExport" class="button button--secondary button--small" type="button">Download table</button>
-        <button id="productionExplorerReset" class="button button--secondary button--small" type="button">Start over</button>
+        <details class="production-guided-advanced production-explorer-more-actions">
+          <summary>More tools</summary>
+          <div class="production-explorer-more-actions__menu">
+            <button id="productionExplorerExport" class="button button--secondary button--small" type="button">Download table</button>
+            <button id="productionExplorerReset" class="button button--secondary button--small" type="button">Start over</button>
+          </div>
+        </details>
       </div>
     </div>
-    <p class="chemistry-why"><strong>Why in chemistry</strong>Downloading or restarting a comparison changes the view, not the evidence; pinning a compound keeps any interesting pattern connected to its source rows.</p>
     <div id="productionExplorerCanvas" class="production-explorer__canvas" aria-live="polite"></div>
     <div id="productionExplorerSelection" class="production-explorer-selection" aria-live="polite"><span class="production-explorer-selection-label">Selected compound</span><strong>No compound selected</strong><small>Select a row or plot point to pin its source evidence.</small></div>
-    <div class="production-explorer-session-bar" aria-label="Optional saved comparison">
-      <label class="production-explorer-session-field"><span>Save this comparison as</span><input id="productionExplorerSessionName" type="text" maxlength="80" placeholder="e.g. binding versus cell result"></label>
-      <label class="production-explorer-session-field production-explorer-session-field--saved"><span>Saved comparisons</span><select id="productionExplorerSessionList"><option value="">No saved comparison selected</option></select></label>
-      <button id="productionExplorerSave" class="button button--secondary button--small" type="button">Save comparison</button>
-      <button id="productionExplorerExportBundle" class="button button--secondary button--small" type="button">Download comparison details</button>
-    </div>
+    <details class="production-guided-advanced production-explorer-session-tools">
+      <summary>Save or export this comparison</summary>
+      <div class="production-explorer-session-bar" aria-label="Optional saved comparison">
+        <label class="production-explorer-session-field"><span>Save this comparison as</span><input id="productionExplorerSessionName" type="text" maxlength="80" placeholder="e.g. binding versus cell result"></label>
+        <label class="production-explorer-session-field production-explorer-session-field--saved"><span>Saved comparisons</span><select id="productionExplorerSessionList"><option value="">No saved comparison selected</option></select></label>
+        <button id="productionExplorerSave" class="button button--secondary button--small" type="button">Save comparison</button>
+        <button id="productionExplorerExportBundle" class="button button--secondary button--small" type="button">Download comparison details</button>
+      </div>
+    </details>
   </div>
 </section>
 {% else %}

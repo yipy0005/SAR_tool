@@ -1,0 +1,5 @@
+compound_id,smiles,assay,result,unit,qualifier,replicate,date
+POS-001,O=C(Nc1ccccn1)Cc1ccccc1,IC50,10000,nM,=,1,2026-09-16
+POS-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,Cellular,5.9,pIC50,=,1,2026-09-16
+POS-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,OffTarget,100,nM,=,1,2026-09-16
+POS-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,Solubility,8,µM,=,1,2026-09-16

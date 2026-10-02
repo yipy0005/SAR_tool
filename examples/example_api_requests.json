@@ -5,6 +5,10 @@
     "rgroup": {
       "scaffold_smarts": "c1ccccc1"
     },
+    "pharmacophore_rgroup": {
+      "scaffold_smarts": "",
+      "reference_compound_id": "REPLACE_WITH_COMPOUND_UUID"
+    },
     "activity_cliffs": {
       "effect_threshold": 0.5
     },

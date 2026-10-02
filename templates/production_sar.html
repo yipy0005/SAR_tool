@@ -1,0 +1,42 @@
+{% extends "production_workspace_base.html" %}
+{% block content %}
+{% if project %}
+<section class="production-sar-heading" aria-labelledby="productionSarHeading">
+  <div>
+    <div class="section-kicker">SAR SERIES · RUN SAR ANALYSIS</div>
+    <h2 id="productionSarHeading">Find observed chemical series</h2>
+    <p class="panel-subtitle">Choose one endpoint, then get an R-group table per shared scaffold, or the local series around one compound.</p>
+  </div>
+  <div class="production-sar-heading__status">
+    <span class="status-badge status-badge--good">{{ counts.compounds }} compounds · {{ counts.measurement_summaries }} summaries</span>
+    <a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='evidence', project_id=project.id) }}">Review evidence</a>
+  </div>
+</section>
+
+<section class="panel production-sar-runner" aria-labelledby="productionSarRunnerHeading">
+  <div class="panel-header">
+    <div><div class="section-kicker">ONE ANALYSIS ENTRY POINT</div><h2 id="productionSarRunnerHeading">What should the analysis show?</h2><p class="panel-subtitle">Start with the endpoint that matters to your chemistry question. You can inspect another endpoint later without re-uploading the file.</p></div>
+  </div>
+  <form id="productionSarForm" class="production-sar-form">
+    <label class="production-sar-field"><span>Endpoint of interest</span><select id="productionSarEndpoint" name="endpoint_key" required>{% for endpoint in sar_endpoints %}<option value="{{ endpoint.compatibility_key }}">{{ endpoint.label }} · {{ endpoint.compound_count }} compounds</option>{% else %}<option value="">No calculated endpoint is available yet</option>{% endfor %}</select><small>Only compatible calculated summaries are offered.</small></label>
+    <fieldset class="production-sar-mode"><legend>Series mode</legend><label><input type="radio" name="mode" value="discover" checked> <span><strong>Discover all series</strong><small>Group observed compounds by shared scaffold and rank the visible endpoint range.</small></span></label><label><input type="radio" name="mode" value="selected"> <span><strong>Start from a selected SAR reference</strong><small>Choose a compound to make it the reference, rerun automatically, and show its observed local series.</small></span></label><label><input type="radio" name="mode" value="prodrug"> <span><strong>Compare prodrug–active pairs</strong><small>Review every linked pair in one endpoint table instead of selecting pairs one at a time.</small></span></label></fieldset>
+    <label id="productionSarCompoundField" class="production-sar-field" hidden><span>Selected compound</span><select id="productionSarCompound" name="selected_compound_id"><option value="">Choose a compound</option>{% for compound in compounds %}<option value="{{ compound.id }}">{{ compound.registration_id }}{% if compound.preferred_name %} · {{ compound.preferred_name }}{% endif %}</option>{% endfor %}</select><small>Use a compound with a validated structure; the analysis will not invent new structures. <button type="button" class="pattern-link-button" data-structure-search-open aria-haspopup="dialog" aria-controls="structureSearchDialog">Find one by structure</button></small></label>
+    <section id="productionSarPairField" class="production-sar-pair-field" hidden aria-labelledby="productionSarPairHeading"><div class="production-sar-pair-field__heading"><div><span class="section-kicker">BULK RELATIONSHIP MAPPING</span><h3 id="productionSarPairHeading">Link all prodrugs to their active forms</h3></div><span id="productionSarPairCount" class="status-badge status-badge--neutral">No pair list loaded</span></div><p>Provide two columns once, then review and compare the whole set. Use registration IDs from this project; a header row is optional.</p><label><span>Pair-list file · optional</span><input id="productionSarPairFile" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values"></label><label><span>Or paste the pair list</span><textarea id="productionSarPairText" rows="5" placeholder="prodrug_id,active_id\nPRO-001,ACT-001\nPRO-002,ACT-002"></textarea></label><small>Expected columns: <code>prodrug_id,active_id</code>. Optional third column: notes. Mapping is saved as needs review; endpoint results remain separately evidenced.</small><div id="productionSarPairSaved" class="production-sar-pair-field__saved" role="status" aria-live="polite"></div></section>
+    <div class="production-sar-form__actions"><button id="productionSarRun" class="button button--primary" type="submit"{% if not sar_endpoints %} disabled{% endif %}>Run SAR analysis <span aria-hidden="true">→</span></button><span id="productionSarStatus" class="production-action-status" role="status" aria-live="polite">Choose an endpoint to begin.</span></div>
+  </form>
+</section>
+
+<section id="productionSarResults" class="production-sar-results" hidden aria-labelledby="productionSarResultsHeading">
+  <div class="production-sar-results__heading"><div><div class="section-kicker">OBSERVED SERIES</div><h2 id="productionSarResultsHeading">Series found in this project</h2><p id="productionSarResultsSummary" class="panel-subtitle"></p></div><span id="productionSarResultsBadge" class="status-badge status-badge--good"></span></div>
+  <p id="productionSarResultsGuide" class="production-sar-results__guide" hidden></p>
+  <div id="productionSarSeriesGrid" class="production-sar-series-grid"></div>
+</section>
+
+<details class="production-guided-advanced production-sar-advanced">
+  <summary>Open advanced analysis tools</summary>
+  <div class="production-sar-advanced__links"><a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='explore', project_id=project.id) }}">Compare endpoints</a><a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='analysis', project_id=project.id) }}">Find patterns</a><a class="button button--secondary button--small" href="{{ url_for('legacy_production_dashboard', project_id=project.id) }}">Expert workspace</a></div>
+</details>
+{% else %}
+<section class="panel"><div class="empty-state"><strong>No project selected.</strong><span>Return to Start after creating a production project.</span></div></section>
+{% endif %}
+{% endblock %}

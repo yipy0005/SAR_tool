@@ -1,0 +1,46 @@
+{% extends "production_workspace_base.html" %}
+{% import "_sar_macros.html" as ui %}
+{% block content %}
+{% if project %}
+<section class="production-focus-heading" aria-labelledby="productionSummariesHeading">
+  <div>
+    <div class="section-kicker">BUILD SUMMARIES</div>
+    <h2 id="productionSummariesHeading">Group compatible results</h2>
+    <p class="panel-subtitle">Create replicate-aware summaries from the uploaded measurements. This is the only action on this page; the original values remain unchanged.</p>
+  </div>
+  <span class="status-badge status-badge--{{ 'good' if measurement_summaries else 'neutral' }}">{{ measurement_summaries|length }} summaries saved</span>
+</section>
+<section class="panel production-single-action" aria-labelledby="summaryActionHeading">
+  <div class="production-single-action__body">
+    <div class="section-kicker">ONE ACTION</div>
+    <h2 id="summaryActionHeading">{% if measurement_summaries %}Summaries are ready for comparison{% else %}Build result summaries{% endif %}</h2>
+    <p class="panel-subtitle">{% if measurement_summaries %}The latest persisted summaries are available to Compare. Running this action again is safe and refreshes the derived read model from the saved measurements.{% else %}The workbench will group compatible repeated results and record the calculation version. No uploaded result is overwritten.{% endif %}</p>
+    <div class="production-single-action__facts" aria-label="Summary inputs">
+      <span><strong>{{ measurements|length }}</strong> uploaded results</span>
+      <span><strong>{{ compounds|length }}</strong> validated compounds</span>
+      <span><strong>0</strong> source values overwritten</span>
+    </div>
+    <button id="productionSummaryButton" class="button button--primary" type="button">{% if measurement_summaries %}Refresh summaries{% else %}Build result summaries{% endif %}</button>
+    <p id="productionSummaryStatus" class="production-action-status" role="status" aria-live="polite">{% if measurement_summaries %}The derived summary step is complete. Open Compare when you are ready.{% else %}Nothing is calculated until you choose this action.{% endif %}</p>
+  </div>
+  <div class="production-single-action__next">
+    <span class="section-kicker">NEXT</span>
+    <strong>Compare compatible tests</strong>
+    <p>After summaries are ready, Compare keeps exact, threshold, missing, and review states distinct.</p>
+    <a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='explore', project_id=project.id) }}">Open Compare <span aria-hidden="true">→</span></a>
+  </div>
+</section>
+{% if measurement_summaries %}
+<section class="panel production-summary-results" aria-labelledby="summaryResultsHeading">
+  {% set summary_assays = measurement_summaries | map(attribute='compatibility_key') | map('endpoint_name') | unique | sort | list %}
+  <div class="panel-header"><div><div class="section-kicker">DERIVED OUTPUT · READ ONLY</div><h2 id="summaryResultsHeading">Saved summary results</h2><p class="panel-subtitle">Calculated from the uploaded measurements, sorted by compound then assay. The Start page shows the same values as a compound × assay table.</p></div></div>
+  {{ ui.table_filter('summaryResults', summary_assays) }}
+  <div class="matrix-wrap"><table class="evidence-table evidence-table--dense" id="summaryResults"><thead><tr><th scope="col">Compound</th><th scope="col">Assay</th><th scope="col">Result</th><th scope="col">State</th><th scope="col">Replicates</th><th scope="col">Sources</th></tr></thead><tbody>
+    {% for summary in measurement_summaries | sort(attribute='registration_id,compatibility_key') %}<tr id="ev-{{ summary.id }}" data-registration-id="{{ summary.registration_id }}" data-assay="{{ summary.compatibility_key | endpoint_name }}"><td><strong>{{ summary.registration_id }}</strong></td><td title="{{ summary.compatibility_key }}">{{ summary.compatibility_key | endpoint_name }}</td><td class="numeric">{{ ui.summary_result(summary) }}</td><td>{{ summary.summary_state | humanize }}</td><td>{{ ui.summary_counts(summary) }}</td><td>{{ ui.source_ids(summary.source_measurement_ids, 'measurement') }}</td></tr>{% else %}<tr><td colspan="6">No calculated summary has been created yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+{% else %}
+<section class="panel"><div class="empty-state"><strong>No project selected.</strong><span>Return to Start after creating a production project.</span></div></section>
+{% endif %}
+{% endblock %}

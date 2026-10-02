@@ -120,7 +120,7 @@ def test_censored_and_missing_values_are_excluded_but_preserved():
 
 def test_persisted_summary_keeps_provenance_and_analysis_version(tmp_path):
     database_path = str(tmp_path / "measurement-summary.db")
-    assert apply_migrations(database_path) == 19
+    assert apply_migrations(database_path) == 22
     now = "2026-09-07T08:00:00+00:00"
     with transaction(database_path) as connection:
         connection.execute(

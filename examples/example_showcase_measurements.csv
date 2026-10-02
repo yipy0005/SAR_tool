@@ -1,0 +1,90 @@
+compound_id,smiles,assay,result,unit,qualifier,replicate,date
+POS-001,O=C(Nc1ccccn1)Cc1ccccc1,IC50,1000,nM,=,1,2026-09-01
+POS-001,O=C(Nc1ccccn1)Cc1ccccc1,IC50,1100,nM,=,2,2026-09-02
+POS-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,IC50,520,nM,=,1,2026-09-01
+POS-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,IC50,560,nM,=,2,2026-09-02
+POS-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,IC50,260,nM,=,1,2026-09-01
+POS-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,IC50,290,nM,=,2,2026-09-02
+POS-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,IC50,110,nM,=,1,2026-09-01
+POS-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,IC50,120,nM,=,2,2026-09-02
+POS-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,IC50,28,nM,=,1,2026-09-01
+POS-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,IC50,32,nM,=,2,2026-09-02
+POS-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,IC50,5,nM,=,1,2026-09-01
+POS-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,IC50,6,nM,=,2,2026-09-02
+POS-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,IC50,420,nM,=,1,2026-09-01
+POS-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,IC50,460,nM,=,2,2026-09-02
+POS-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,IC50,310,nM,=,1,2026-09-01
+POS-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,IC50,340,nM,=,2,2026-09-02
+POS-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,IC50,800,nM,=,1,2026-09-01
+POS-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,IC50,900,nM,=,2,2026-09-02
+POS-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,IC50,18,nM,=,1,2026-09-01
+POS-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,IC50,22,nM,=,2,2026-09-02
+POS-001,O=C(Nc1ccccn1)Cc1ccccc1,Cellular,5.2,pIC50,=,1,2026-09-03
+POS-001,O=C(Nc1ccccn1)Cc1ccccc1,Cellular,5.3,pIC50,=,2,2026-09-04
+POS-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,Cellular,5.5,pIC50,=,1,2026-09-03
+POS-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,Cellular,5.6,pIC50,=,2,2026-09-04
+POS-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,Cellular,5.8,pIC50,=,1,2026-09-03
+POS-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,Cellular,5.7,pIC50,=,2,2026-09-04
+POS-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,Cellular,6.1,pIC50,=,1,2026-09-03
+POS-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,Cellular,6.2,pIC50,=,2,2026-09-04
+POS-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,Cellular,6.7,pIC50,=,1,2026-09-03
+POS-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,Cellular,6.8,pIC50,=,2,2026-09-04
+POS-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,Cellular,7.5,pIC50,=,1,2026-09-03
+POS-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,Cellular,7.6,pIC50,=,2,2026-09-04
+POS-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,Cellular,5.8,pIC50,=,1,2026-09-03
+POS-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,Cellular,5.9,pIC50,=,2,2026-09-04
+POS-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,Cellular,6.0,pIC50,=,1,2026-09-03
+POS-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,Cellular,6.1,pIC50,=,2,2026-09-04
+POS-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,Cellular,not reported,pIC50,=,1,2026-09-03
+POS-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,Cellular,7.1,pIC50,=,1,2026-09-03
+POS-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,Cellular,7.2,pIC50,=,2,2026-09-04
+POS-001,O=C(Nc1ccccn1)Cc1ccccc1,OffTarget,4.0,pIC50,=,1,2026-09-05
+POS-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,OffTarget,4.1,pIC50,=,1,2026-09-05
+POS-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,OffTarget,4.2,pIC50,=,1,2026-09-05
+POS-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,OffTarget,4.3,pIC50,=,1,2026-09-05
+POS-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,OffTarget,4.4,pIC50,=,1,2026-09-05
+POS-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,OffTarget,4.6,pIC50,=,1,2026-09-05
+POS-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,OffTarget,4.2,pIC50,=,1,2026-09-05
+POS-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,OffTarget,4.5,pIC50,=,1,2026-09-05
+POS-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,OffTarget,4.0,pIC50,=,1,2026-09-05
+POS-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,OffTarget,4.5,pIC50,=,1,2026-09-05
+POS-001,O=C(Nc1ccccn1)Cc1ccccc1,CLint,18,uL/min/mg,=,1,2026-09-06
+POS-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,CLint,15,uL/min/mg,=,1,2026-09-06
+POS-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,CLint,12,uL/min/mg,=,1,2026-09-06
+POS-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,CLint,8,uL/min/mg,=,1,2026-09-06
+POS-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,CLint,5,uL/min/mg,=,1,2026-09-06
+POS-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,CLint,2,uL/min/mg,=,1,2026-09-06
+POS-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,CLint,9,uL/min/mg,=,1,2026-09-06
+POS-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,CLint,13,uL/min/mg,=,1,2026-09-06
+POS-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,CLint,16,uL/min/mg,=,1,2026-09-06
+POS-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,CLint,4,uL/min/mg,=,1,2026-09-06
+POS-001,O=C(Nc1ccccn1)Cc1ccccc1,Papp,5,10^-6 cm/s,=,1,2026-09-06
+POS-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,Papp,7,10^-6 cm/s,=,1,2026-09-06
+POS-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,Papp,9,10^-6 cm/s,=,1,2026-09-06
+POS-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,Papp,13,10^-6 cm/s,=,1,2026-09-06
+POS-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,Papp,18,10^-6 cm/s,=,1,2026-09-06
+POS-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,Papp,26,10^-6 cm/s,=,1,2026-09-06
+POS-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,Papp,11,10^-6 cm/s,=,1,2026-09-06
+POS-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,Papp,8,10^-6 cm/s,=,1,2026-09-06
+POS-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,Papp,6,10^-6 cm/s,=,1,2026-09-06
+POS-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,Papp,21,10^-6 cm/s,=,1,2026-09-06
+POS-001,O=C(Nc1ccccn1)Cc1ccccc1,Solubility,120,µM,=,1,2026-09-06
+POS-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,Solubility,100,µM,=,1,2026-09-06
+POS-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,Solubility,80,µM,=,1,2026-09-06
+POS-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,Solubility,65,µM,=,1,2026-09-06
+POS-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,Solubility,45,µM,=,1,2026-09-06
+POS-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,Solubility,18,µM,=,1,2026-09-06
+POS-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,Solubility,70,µM,=,1,2026-09-06
+POS-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,Solubility,30,µM,=,1,2026-09-06
+POS-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,Solubility,90,µM,=,1,2026-09-06
+POS-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,Solubility,25,µM,>,1,2026-09-06
+POS-001,O=C(Nc1ccccn1)Cc1ccccc1,CYP3A4,0.5,µM,=,1,2026-09-06
+POS-002,O=C(Nc1ccccn1)Cc1ccc(C)cc1,CYP3A4,0.6,µM,=,1,2026-09-06
+POS-003,O=C(Nc1ccccn1)Cc1ccc(OC)cc1,CYP3A4,0.7,µM,=,1,2026-09-06
+POS-004,O=C(Nc1ccccn1)Cc1ccc(F)cc1,CYP3A4,0.9,µM,=,1,2026-09-06
+POS-005,O=C(Nc1ccccn1)Cc1ccc(Cl)cc1,CYP3A4,1.1,µM,=,1,2026-09-06
+POS-006,O=C(Nc1ccccn1)Cc1ccc(C(F)(F)F)cc1,CYP3A4,1.8,µM,=,1,2026-09-06
+POS-007,O=C(Nc1cccnc1)Cc1ccc(Cl)cc1,CYP3A4,0.8,µM,=,1,2026-09-06
+POS-008,CN(c1ccccn1)C(=O)Cc1ccc(C(F)(F)F)cc1,CYP3A4,not run,µM,=,1,2026-09-06
+POS-009,O=C(Nc1ccccn1)CCc1ccc(F)cc1,CYP3A4,0.6,µM,=,1,2026-09-06
+POS-010,O=C(Nc1ccccn1)Cc1ccc(N2CCOCC2)cc1,CYP3A4,1.4,µM,=,1,2026-09-06

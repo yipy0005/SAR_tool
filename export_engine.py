@@ -124,6 +124,17 @@ def build_project_export(
             "SELECT * FROM analysis_runs WHERE project_id = ? ORDER BY created_at, id",
             (project_id,),
         ))
+        pharmacophore_rgroup = _dict_rows(connection.execute(
+            """
+            SELECT pra.*, c.registration_id
+            FROM pharmacophore_rgroup_assignments pra
+            JOIN analysis_runs ar ON ar.id = pra.analysis_run_id
+            JOIN compounds c ON c.id = pra.compound_id
+            WHERE ar.project_id = ?
+            ORDER BY ar.created_at, c.registration_id, pra.id
+            """,
+            (project_id,),
+        ))
         claims = _dict_rows(connection.execute(
             "SELECT * FROM sar_claims WHERE project_id = ? ORDER BY created_at, id",
             (project_id,),
@@ -164,11 +175,24 @@ def build_project_export(
             """,
             (project_id,),
         ))
+        compound_relationships = _dict_rows(connection.execute(
+            """
+            SELECT cr.*, p.registration_id AS prodrug_registration_id,
+                   a.registration_id AS active_registration_id
+            FROM compound_relationships AS cr
+            JOIN compounds AS p ON p.id = cr.prodrug_compound_id
+            JOIN compounds AS a ON a.id = cr.active_compound_id
+            WHERE cr.project_id = ?
+            ORDER BY p.registration_id, a.registration_id, cr.id
+            """,
+            (project_id,),
+        ))
 
     row_count = (
         len(compounds) + len(structures) + len(measurements) + len(summaries)
-        + len(analyses) + len(claims) + len(designs) + len(generated)
+        + len(analyses) + len(pharmacophore_rgroup) + len(claims) + len(designs) + len(generated)
         + len(series) + len(series_versions) + len(series_memberships)
+        + len(compound_relationships)
     )
     if row_count > max_rows:
         raise ExportError(f"Export exceeds the {max_rows} row safety limit")
@@ -183,6 +207,13 @@ def build_project_export(
         item["data_origin"] = "derived"
     for item in analyses:
         item["input_selection"] = _json_value(item.pop("input_selection_json", None), {})
+        item["data_origin"] = "derived"
+    for item in pharmacophore_rgroup:
+        item["match_atoms"] = _json_value(item.pop("match_atoms_json", None), [])
+        item["sites"] = _json_value(item.pop("sites_json", None), [])
+        item["features"] = _json_value(item.pop("features_json", None), [])
+        item["core_features"] = _json_value(item.pop("core_features_json", None), [])
+        item["core_feature_delta"] = _json_value(item.pop("core_feature_delta_json", None), {})
         item["data_origin"] = "derived"
     for item in claims:
         item["scope_definition"] = _json_value(item.pop("scope_definition_json", None), {})
@@ -199,6 +230,10 @@ def build_project_export(
         item["score_components"] = _json_value(item.pop("score_components_json", None), {})
         item["data_origin"] = "generated"
         item["experimentally_confirmed"] = False
+    for item in compound_relationships:
+        item["activation_context"] = _json_value(item.pop("activation_context_json", None), {})
+        item["evidence_ids"] = _json_value(item.pop("evidence_ids_json", None), [])
+        item["data_origin"] = "imported"
     for item in series:
         item["data_origin"] = "curated"
     for item in series_versions:
@@ -219,12 +254,14 @@ def build_project_export(
         "measurements": measurements,
         "measurement_summaries": summaries,
         "analysis_runs": analyses,
+        "pharmacophore_rgroup_assignments": pharmacophore_rgroup,
         "claims": claims,
         "curated_designs": designs,
         "generated_recommendations": generated,
         "series": series,
         "series_versions": series_versions,
         "series_memberships": series_memberships,
+        "compound_relationships": compound_relationships,
         "row_count": row_count,
         "max_rows": max_rows,
         "data_origin": "production_export",
@@ -301,6 +338,8 @@ def export_project_csv(bundle: dict[str, Any]) -> str:
         write_record("measurement_summary", item)
     for item in bundle["analysis_runs"]:
         write_record("analysis_run", item)
+    for item in bundle["pharmacophore_rgroup_assignments"]:
+        write_record("pharmacophore_rgroup_assignment", item)
     for item in bundle["claims"]:
         write_record("claim", item)
     for item in bundle["curated_designs"]:

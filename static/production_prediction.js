@@ -36,7 +36,7 @@
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || payload.error || `Request failed (${response.status})`);
       const model = payload.model || {};
-      setStatus(`Qualification complete: ${model.model_status || "candidate"}. Predictions remain scoped to this endpoint and applicability domain. Reloading…`, model.model_status === "internally_validated" ? "success" : "warning");
+      setStatus(`Qualification complete: ${window.SARFormat ? window.SARFormat.humanize(model.model_status || "candidate") : (model.model_status || "candidate")}. Predictions remain scoped to this endpoint and applicability domain. Reloading…`, model.model_status === "internally_validated" ? "success" : "warning");
       window.setTimeout(() => window.location.reload(), 400);
     } catch (error) {
       setStatus(`Qualification failed: ${error.message}`, "error");

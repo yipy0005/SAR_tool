@@ -1,0 +1,17 @@
+compound_id,smiles,assay,result,unit,qualifier,replicate,date
+PRO-001,CCOC(=O)c1ccccc1,IC50,240,nM,=,1,2026-09-01
+PRO-001,CCOC(=O)c1ccccc1,IC50,260,nM,=,2,2026-09-02
+ACT-001,O=C(O)c1ccccc1,IC50,24,nM,=,1,2026-09-01
+ACT-001,O=C(O)c1ccccc1,IC50,28,nM,=,2,2026-09-02
+PRO-002,CCOC(=O)c1ccc(C)cc1,IC50,210,nM,=,1,2026-09-01
+PRO-002,CCOC(=O)c1ccc(C)cc1,IC50,225,nM,=,2,2026-09-02
+ACT-002,O=C(O)c1ccc(C)cc1,IC50,42,nM,=,1,2026-09-01
+ACT-002,O=C(O)c1ccc(C)cc1,IC50,48,nM,=,2,2026-09-02
+PRO-003,CCOC(=O)c1ccc(Cl)cc1,IC50,90,nM,=,1,2026-09-01
+PRO-003,CCOC(=O)c1ccc(Cl)cc1,IC50,105,nM,=,2,2026-09-02
+ACT-003,O=C(O)c1ccc(Cl)cc1,IC50,9,nM,=,1,2026-09-01
+ACT-003,O=C(O)c1ccc(Cl)cc1,IC50,12,nM,=,2,2026-09-02
+PRO-004,CCOC(=O)c1ccc(OC)cc1,IC50,380,nM,=,1,2026-09-01
+PRO-004,CCOC(=O)c1ccc(OC)cc1,IC50,420,nM,=,2,2026-09-02
+ACT-004,O=C(O)c1ccc(OC)cc1,IC50,not reported,nM,=,1,2026-09-01
+ACT-004,O=C(O)c1ccc(OC)cc1,IC50,not reported,nM,=,2,2026-09-02

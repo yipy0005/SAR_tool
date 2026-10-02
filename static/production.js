@@ -28,8 +28,13 @@
   const mappingControls = document.querySelector("#productionMappingControls");
   const previewWithMappingButton = document.querySelector("#productionPreviewWithMapping");
   const importRows = document.querySelector("#productionImportRows");
+  const importRowsSummary = document.querySelector("#productionImportRowsSummary");
+  const importRowsTable = document.querySelector("#productionImportRowsTable");
+  const importRowsHeading = document.querySelector("#productionImportRowsHeading");
+  const importRowsToggle = document.querySelector("#productionImportRowsToggle");
   const importRowsBody = document.querySelector("#productionImportRowsBody");
   const importRowsMore = document.querySelector("#productionImportRowsMore");
+  let showAllImportRows = false;
   let pendingImportId = null;
   let pendingFile = null;
   let pendingPreview = null;
@@ -81,7 +86,7 @@
   });
 
   const setButtonsBusy = (busy) => {
-    document.querySelectorAll("#production-actions button").forEach((button) => {
+    document.querySelectorAll("#production-actions button, #productionAnalysisButton").forEach((button) => {
       button.disabled = busy;
     });
     if (!busy) setPendingImportActionsDisabled(hasPendingImportState());
@@ -123,7 +128,7 @@
     const summaryButton = document.querySelector("#productionSummaryButton");
     const analysisButton = document.querySelector("#productionAnalysisButton");
     if (summaryButton) summaryButton.textContent = "Build result summaries";
-    if (analysisButton) analysisButton.textContent = "Find patterns";
+    if (analysisButton) analysisButton.textContent = document.querySelector("#production-pattern-action") ? "Run pattern checks" : "Find patterns";
   };
 
   const reloadAfter = (message) => {
@@ -193,9 +198,17 @@
     if (!mappingReview || !mappingControls || !previewWithMappingButton) return;
     const issues = Array.isArray(result.mapping_issues) ? result.mapping_issues : [];
     const options = result.mapping_options || {};
+    const wideEndpointOptions = Array.isArray(options.wide_endpoint_columns) ? options.wide_endpoint_columns : [];
     mappingControls.replaceChildren();
+    if (wideEndpointOptions.length) {
+      const detected = document.createElement("p");
+      detected.className = "production-wide-endpoints";
+      detected.textContent = `Detected endpoint columns: ${wideEndpointOptions.map((option) => `${option.label} → ${option.assay} (${option.unit})`).join(", ")}. Verify inferred units before saving.`;
+      mappingControls.append(detected);
+    }
     let selectableFields = 0;
     Object.entries(options).forEach(([field, fieldOptions]) => {
+      if (field === "wide_endpoint_columns") return;
       const current = result.mapping?.[field];
       if (!Array.isArray(fieldOptions) || fieldOptions.length < 2 || current) return;
       selectableFields += 1;
@@ -222,7 +235,9 @@
     }
     const blockingCount = issues.filter(isBlockingMappingIssue).length;
     if (mappingReviewText) {
-      mappingReviewText.textContent = `${blockingCount} column choice${blockingCount === 1 ? " needs" : "s need"} attention. Choose the intended source column; other warnings remain visible in the report.`;
+      mappingReviewText.textContent = wideEndpointOptions.length
+        ? "The file uses wide endpoint columns. They will be expanded into source-linked measurements; verify inferred units before saving."
+        : `${blockingCount} column choice${blockingCount === 1 ? " needs" : "s need"} attention. Choose the intended source column; other warnings remain visible in the report.`;
     }
     previewWithMappingButton.hidden = selectableFields === 0;
     mappingReview.hidden = false;
@@ -231,13 +246,38 @@
   const renderCleaningRows = (rows) => {
     if (!importRows || !importRowsBody || !importRowsMore) return;
     importRowsBody.replaceChildren();
-    const visibleRows = rows.slice(0, visibleRowCount);
+    const problematicRows = rows
+      .filter((row) => (row.errors || []).length || (row.warnings || []).length || row.status !== "accepted")
+      .sort((first, second) => {
+        const score = (row) => (row.errors || []).length * 100 + (row.warnings || []).length * 10 + (row.status === "accepted" ? 0 : 1);
+        const scoreDifference = score(second) - score(first);
+        if (scoreDifference) return scoreDifference;
+        return String(first.source_row_id || "").localeCompare(String(second.source_row_id || ""), undefined, { numeric: true });
+      });
+    const readyCount = Math.max(0, rows.length - problematicRows.length);
+    const displayedRows = showAllImportRows ? rows : problematicRows;
+
+    importRows.hidden = rows.length === 0;
+    if (importRowsSummary) {
+      importRowsSummary.hidden = rows.length === 0;
+      importRowsSummary.dataset.state = problematicRows.length ? "attention" : "clear";
+      importRowsSummary.textContent = problematicRows.length
+        ? `${problematicRows.length} row${problematicRows.length === 1 ? "" : "s"} need${problematicRows.length === 1 ? "s" : ""} attention. ${readyCount} ready row${readyCount === 1 ? "" : "s"} are hidden until you choose to review them.`
+        : `All ${rows.length} rows are ready to save. No row warnings or errors were found.`;
+    }
+    if (importRowsHeading) {
+      importRowsHeading.textContent = showAllImportRows
+        ? "ALL ROWS"
+        : problematicRows.length ? "ROWS NEEDING ATTENTION" : "READY TO SAVE";
+    }
+
+    const visibleRows = displayedRows.slice(0, visibleRowCount);
     visibleRows.forEach((row) => {
       const tableRow = document.createElement("tr");
       const sourceCell = document.createElement("td");
       sourceCell.textContent = row.source_row_id || "—";
       const statusCell = document.createElement("td");
-      statusCell.className = row.status === "accepted" ? "cleaning-accepted" : "cleaning-rejected";
+      statusCell.className = row.status === "accepted" && !(row.errors || []).length && !(row.warnings || []).length ? "cleaning-accepted" : "cleaning-rejected";
       statusCell.textContent = row.status === "accepted" ? "Ready to save" : row.status === "rejected" ? "Needs attention" : "Review";
       const locationCell = document.createElement("td");
       const location = row.source_location || {};
@@ -248,7 +288,7 @@
       const issuesCell = document.createElement("td");
       const issues = [
         ...(row.errors || []).map((error) => `Error: ${error.message || error}`),
-        ...(row.warnings || []).map((warning) => `Warning: ${warning}`),
+        ...(row.warnings || []).map((warning) => `Warning: ${window.SARFormat ? window.SARFormat.humanize(warning) : warning}`),
       ];
       if (!issues.length) issues.push("No issues in this row");
       const list = document.createElement("ul");
@@ -261,13 +301,20 @@
       tableRow.append(sourceCell, statusCell, locationCell, issuesCell);
       importRowsBody.append(tableRow);
     });
-    importRows.hidden = rows.length === 0;
-    importRowsMore.hidden = rows.length <= visibleRowCount;
+    if (importRowsTable) importRowsTable.hidden = displayedRows.length === 0;
+    if (importRowsToggle) {
+      importRowsToggle.hidden = rows.length === 0;
+      importRowsToggle.textContent = showAllImportRows
+        ? (problematicRows.length ? "Show only rows needing attention" : "Hide ready-row details")
+        : problematicRows.length ? `Review all ${rows.length} rows` : `Review all ${rows.length} ready rows`;
+    }
+    importRowsMore.hidden = displayedRows.length <= visibleRowCount || displayedRows.length === 0;
   };
 
   const renderCleaningReport = (result) => {
     pendingPreview = result;
     visibleRowCount = 25;
+    showAllImportRows = false;
     renderProfileSummary(result.profile || {});
     renderMappingReview(result);
     renderCleaningRows(Array.isArray(result.rows) ? result.rows : []);
@@ -358,6 +405,11 @@
     if (workbookProfile && pendingFile && !/\.xlsx$/i.test(pendingFile.name)) workbookProfile.hidden = true;
   });
 
+  document.querySelector("[data-open-production-actions]")?.addEventListener("click", () => {
+    const projectTools = document.querySelector("#productionProjectTools");
+    if (projectTools) projectTools.open = true;
+  });
+
   document.querySelector("#productionImportForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const file = fileInput?.files?.[0];
@@ -423,6 +475,12 @@
     });
   });
 
+  importRowsToggle?.addEventListener("click", () => {
+    showAllImportRows = !showAllImportRows;
+    visibleRowCount = 25;
+    renderCleaningRows(Array.isArray(pendingPreview?.rows) ? pendingPreview.rows : []);
+  });
+
   importRowsMore?.addEventListener("click", () => {
     visibleRowCount += 25;
     renderCleaningRows(Array.isArray(pendingPreview?.rows) ? pendingPreview.rows : []);
@@ -462,10 +520,67 @@
     }
   });
 
+  const pharmacophoreReference = document.querySelector("[data-pharmacophore-reference]");
+  const pharmacophoreScaffold = document.querySelector("[data-pharmacophore-scaffold]");
+  const pharmacophorePayload = () => ({
+    project_id: projectId,
+    scaffold_smarts: String(pharmacophoreScaffold?.value || "").trim(),
+    reference_compound_id: String(pharmacophoreReference?.value || "").trim(),
+  });
+  // Find by structure (static/structure_search.js): a hit can become the pharmacophore reference.
+  if (pharmacophoreReference) {
+    (window.SARStructureActions = window.SARStructureActions || []).push({
+      id: "pharmacophore-reference",
+      scope: "compound",
+      label: "Use as pharmacophore reference",
+      run: ({ compoundId }) => {
+        if (![...pharmacophoreReference.options].some((option) => option.value === compoundId)) return false;
+        pharmacophoreReference.value = compoundId;
+        const name = pharmacophoreReference.selectedOptions[0]?.textContent || "The compound";
+        setStatus(`${name} is now the pharmacophore reference. Refresh pattern checks to rerun the R-group decomposition around it.`);
+        pharmacophoreReference.scrollIntoView({ behavior: "smooth", block: "center" });
+        pharmacophoreReference.focus({ preventScroll: true });
+        return true;
+      },
+    });
+  }
+  // A drawn or typed query can become the declared core used by both R-group analyses.
+  if (pharmacophoreScaffold) {
+    const applyCore = (smarts, points, source) => {
+      pharmacophoreScaffold.value = smarts;
+      pharmacophoreScaffold.dispatchEvent(new Event("input", { bubbles: true }));
+      const stripped = points ? ` ${points} attachment point${points === 1 ? " was" : "s were"} removed; substituents are found wherever a compound extends the core.` : "";
+      setStatus(`Declared core set from ${source}.${stripped} Refresh pattern checks to rerun the R-group analyses with it.`);
+      pharmacophoreScaffold.scrollIntoView({ behavior: "smooth", block: "center" });
+      pharmacophoreScaffold.focus({ preventScroll: true });
+      return true;
+    };
+    (window.SARStructureActions = window.SARStructureActions || []).push(
+      {
+        // "Draw core": the drawing's SMARTS goes straight into the field, no search needed.
+        id: "declared-core-drawing",
+        scope: "drawing",
+        label: "Use drawing as core",
+        run: ({ result, label }) => applyCore(result.core_smarts, result.attachment_points, label === "drawing" ? "the drawing" : "the typed structure"),
+      },
+      {
+        id: "declared-core",
+        scope: "set",
+        label: "Use as declared core",
+        run: ({ query, counts }) => {
+          if (!query?.core_smarts) return query?.core_issue || "This query cannot be used as a core.";
+          return applyCore(query.core_smarts, query.core_attachment_points, `the structure search (${counts.matched} of ${counts.total} compounds contain it)`);
+        },
+      },
+    );
+  }
+
   const analysisRequests = [
     ["properties", "/api/v1/analysis/properties", { project_id: projectId }],
     ["MMP", "/api/v1/analysis/mmp", { project_id: projectId }],
-    ["R-group", "/api/v1/analysis/rgroup", { project_id: projectId, scaffold_smarts: "c1ccccc1" }],
+    // Read when the checks run, so a reference or core chosen after page load is the one used.
+    ["R-group", "/api/v1/analysis/rgroup", () => ({ project_id: projectId, scaffold_smarts: pharmacophoreScaffold?.value || "c1ccccc1" })],
+    ["pharmacophore R-group", "/api/v1/analysis/pharmacophore-rgroup", pharmacophorePayload],
     ["activity cliffs", "/api/v1/analysis/activity-cliffs", { project_id: projectId, effect_threshold: 0.5, similarity_threshold: 0.8 }],
     ["selectivity", "/api/v1/analysis/selectivity", {
       project_id: projectId,
@@ -511,6 +626,7 @@
       properties: "chemical properties",
       MMP: "compound-to-compound changes",
       "R-group": "structure changes",
+      "pharmacophore R-group": "pharmacophore features by R-group",
       "activity cliffs": "unexpected differences",
       selectivity: "one-test versus another",
       "cellular translation": "lab-to-cell results",
@@ -522,7 +638,7 @@
     for (const [label, url, payload] of analysisRequests) {
       setStatus(`Checking ${analysisDisplayNames[label] || label}…`);
       try {
-        const result = await postJson(url, payload);
+        const result = await postJson(url, typeof payload === "function" ? payload() : payload);
         completed.push(label);
         if (label === "information-gap analysis") {
           informationGainRunId = result.analysis_run_id || result.run_id || null;
@@ -549,20 +665,21 @@
   });
 
   const renderRecommendations = (recommendations) => {
-    const container = document.querySelector("#productionRecommendations");
-    if (!container) return;
+    const panel = document.querySelector("#productionRecommendations");
+    if (!panel) return;
+    // Render into the list slot so the panel heading and empty state stay visible.
+    const container = panel.querySelector("[data-recommendation-list]") || panel;
     if (!recommendations.length) {
-      container.innerHTML = "";
+      if (container !== panel) return;
+      container.innerHTML = `<div class="empty-state">No suggested questions are awaiting review.</div>`;
       return;
     }
     container.innerHTML = `
-      <div class="section-kicker">SUGGESTED QUESTIONS <span class="status-badge status-badge--warn">review required</span></div>
-      <p class="panel-subtitle" style="margin-bottom: 9px;">These prompts come from calculated evidence-gap checks. Review the cited results; none is an experimentally confirmed answer.</p>
       <div style="display: grid; gap: 8px;">
         ${recommendations.map((recommendation) => `
           <div style="padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-elevated);">
             <strong>${escapeHtml(recommendation.title || recommendation.recommendation_type || recommendation.id)}</strong>
-            <div style="margin-top: 4px; color: var(--text-muted); font-size: 11px;">${escapeHtml(recommendation.rationale || recommendation.description || "Evidence-gap recommendation")}</div>
+            <div style="margin-top: 4px; color: var(--text-muted); font-size: 13px;">${escapeHtml(recommendation.rationale || recommendation.description || "Evidence-gap recommendation")}</div>
             <div style="display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-top: 9px;">
               <span class="status-badge status-badge--warn">${escapeHtml(recommendation.review_status || recommendation.status || "pending_review")}</span>
               <button class="button button--secondary button--small" type="button" data-review-recommendation="${escapeHtml(recommendation.id)}" data-review-status="approved">Approve for review</button>
@@ -607,6 +724,12 @@
       // Session storage may be unavailable.
     }
     if (!importId) return;
+    pendingImportId = importId;
+    setPendingImportActionsDisabled(true);
+    if (!document.querySelector("#productionImportForm")) {
+      setStatus("A checked file is waiting on Start. Save accepted results there before continuing.", "error");
+      return;
+    }
     try {
       await loadExistingPreview(importId);
       setStatus("Your checked file was restored. Review it and save accepted results when ready.", "success");

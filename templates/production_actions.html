@@ -5,29 +5,25 @@
       <div class="section-kicker">STEP 1 · CHOOSE A FILE</div>
       <h2>Add your lab results</h2>
       <p class="panel-subtitle">Choose a CSV, TSV, or Excel file. We check it first; nothing is saved until you review the results.</p>
-      <p class="chemistry-why"><strong>Why in chemistry</strong>Raw exports can contain wrong units, shifted columns, duplicate compounds, or unresolved structures; checking first prevents those issues from becoming SAR evidence.</p>
       {% else %}
       <div class="section-kicker">START · ADD MORE RESULTS</div>
       <h2>Add another lab results file</h2>
       <p class="panel-subtitle">Check another file before saving it. Existing results stay unchanged, and every saved value keeps its source location.</p>
-      <p class="chemistry-why"><strong>Why in chemistry</strong>Keeping new assay results separate until review lets you extend a series without silently overwriting earlier measurements or provenance.</p>
       {% endif %}
     </div>
     {% if counts.measurements == 0 %}<span class="status-badge status-badge--neutral">nothing saved yet</span>{% else %}<span class="status-badge status-badge--good">results available</span>{% endif %}
   </div>
   <div class="production-actions-panel__body">
-    <div class="production-actions-grid">
+    <div class="production-actions-grid production-actions-grid--single">
       <form id="productionImportForm" enctype="multipart/form-data" class="production-action-card">
         <div class="section-kicker">CHECK BEFORE SAVING</div>
         <h3>Choose a lab export</h3>
         <p class="panel-subtitle">We look for compound names, structures, test names, values, units, and notes. The original file is kept for review.</p>
-        <p class="chemistry-why"><strong>Why in chemistry</strong>Those fields connect a measured response to the correct molecule and experimental context; without that link, a potency comparison can be misleading.</p>
         <label for="productionCsvFile">File from your lab system</label>
         <input id="productionCsvFile" name="file" type="file" accept=".csv,.tsv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
         <div id="productionWorkbookProfile" class="production-workbook-profile" hidden>
           <div class="section-kicker">EXCEL FILE DETAILS</div>
           <p id="productionWorkbookProfileText" class="panel-subtitle"></p>
-          <p class="chemistry-why"><strong>Why in chemistry</strong>Choosing the right sheet and header rows keeps compound IDs, structures, assays, and values aligned to the correct source cells.</p>
           <div class="production-workbook-profile__controls">
             <label for="productionWorkbookSheet">Sheet</label>
             <select id="productionWorkbookSheet"></select>
@@ -46,62 +42,42 @@
         </div>
         <button id="productionPreviewButton" class="button button--primary button--small" type="submit">Check this file</button>
       </form>
-      {% if counts.measurements == 0 %}
-      <section class="production-action-card production-action-card--locked">
-        <div class="section-kicker">STEP 2 · AFTER SAVING</div>
-        <h3>Understand your results</h3>
-        <p class="panel-subtitle">After accepted rows are saved, Check results shows the source values, Compare puts tests side by side, and Find patterns opens calculated views.</p>
-        <p class="chemistry-why"><strong>Why in chemistry</strong>Summaries and patterns are meaningful only after the underlying measurements, identities, and assay contexts are fixed in the project.</p>
-        <div class="page-actions production-action-card__buttons">
-          <button id="productionSummaryButton" class="button button--secondary button--small" type="button" disabled>Build result summaries</button>
-          <button id="productionAnalysisButton" class="button button--primary button--small" type="button" disabled>Find patterns</button>
+
+    <details class="production-guided-advanced">
+      <summary>More tools for this project</summary>
+      <div class="production-action-links">
+        <span class="footer-note">Downloads keep the project boundary and show whether each value is uploaded, calculated, or reviewable.</span>
+        <div class="page-actions">
+          <a class="button button--secondary button--small" href="{{ url_for('export_project_api', project_id=project.id, format='json') }}">Download JSON</a>
+          <a class="button button--secondary button--small" href="{{ url_for('export_project_api', project_id=project.id, format='csv') }}">Download CSV</a>
+          <a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='explore', project_id=project.id) }}">Open Compare</a>
         </div>
-      </section>
-      {% else %}
-      <section class="production-action-card">
-        <div class="section-kicker">STEP 4 · FIND PATTERNS</div>
-        <h3>Build summaries, then look for patterns</h3>
-        <p class="panel-subtitle">Summaries group compatible repeated results. Pattern checks are calculated aids for review, not proof of cause or prediction.</p>
-        <p class="chemistry-why"><strong>Why in chemistry</strong>Grouping compatible repeats gives each compound a fairer comparison and keeps censoring, missingness, and assay context visible.</p>
-        <div class="page-actions production-action-card__buttons">
-          <button id="productionSummaryButton" class="button button--secondary button--small" type="button">Build result summaries</button>
-          <button id="productionAnalysisButton" class="button button--primary button--small" type="button">Find patterns</button>
-        </div>
-      </section>
-      {% endif %}
-    </div>
-    <div class="production-action-links">
-      <span class="footer-note">Downloads keep the project boundary and show whether each value is uploaded, calculated, or reviewable.</span>
-      <span class="chemistry-why"><strong>Why in chemistry</strong>Exports and comparisons should preserve the source trail so a medicinal-chemistry conclusion can be checked outside the screen.</span>
-      <div class="page-actions">
-        <a class="button button--secondary button--small" href="{{ url_for('export_project_api', project_id=project.id, format='json') }}">Download JSON</a>
-        <a class="button button--secondary button--small" href="{{ url_for('export_project_api', project_id=project.id, format='csv') }}">Download CSV</a>
-        <a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='explore', project_id=project.id) }}">Open Compare</a>
       </div>
-    </div>
+    </details>
     <div id="productionImportPreview" hidden class="production-import-preview">
       <div class="section-kicker">FILE CHECK REPORT <span class="production-technical-label">import cleaning report</span></div>
-      <p class="panel-subtitle">Ready rows can be saved. Rows with warnings or errors stay visible with their source location so you can decide what to do.</p>
-      <p class="chemistry-why"><strong>Why in chemistry</strong>Source locations let you correct the lab export or defend a value later instead of guessing which molecule or assay row it came from.</p>
+      <p class="panel-subtitle">Rows needing attention are shown first. Ready rows stay available through an explicit review control, so large clean files do not bury the useful information.</p>
       <div id="productionImportPreviewText" class="production-import-preview__text"></div>
       <div id="productionImportProfile" class="production-import-report__profile" hidden></div>
       <div id="productionMappingReview" class="production-import-report__mapping" hidden>
         <div class="section-kicker">COLUMN MATCHING <span class="production-technical-label">mapping review</span></div>
         <p id="productionMappingReviewText" class="panel-subtitle"></p>
-        <p class="chemistry-why"><strong>Why in chemistry</strong>Mapping the right columns prevents an assay name, unit, or structure from being attached to the wrong compound or measurement.</p>
         <div id="productionMappingControls" class="production-mapping-controls"></div>
         <button id="productionPreviewWithMapping" class="button button--secondary button--small" type="button" hidden>Check with these column choices</button>
       </div>
       <div id="productionImportRows" class="production-import-report__rows" hidden>
-        <div class="section-kicker">ROW-BY-ROW REVIEW</div>
-        <p class="chemistry-why"><strong>Why in chemistry</strong>One invalid structure or unresolved qualifier can change the meaning of a SAR comparison, so each row remains reviewable before it enters the project.</p>
-        <div class="table-scroll">
+        <div id="productionImportRowsHeading" class="section-kicker">ROW-BY-ROW REVIEW</div>
+        <div id="productionImportRowsSummary" class="production-import-report__rows-summary" hidden></div>
+        <div id="productionImportRowsTable" class="table-scroll" hidden>
           <table class="data-table production-cleaning-table">
             <thead><tr><th>File row</th><th>Can it be used?</th><th>Where it came from</th><th>What needs attention</th></tr></thead>
             <tbody id="productionImportRowsBody"></tbody>
           </table>
         </div>
-        <button id="productionImportRowsMore" class="button button--secondary button--small" type="button" hidden>Show more rows</button>
+        <div class="production-import-report__row-actions">
+          <button id="productionImportRowsToggle" class="button button--secondary button--small" type="button" hidden>Review all ready rows</button>
+          <button id="productionImportRowsMore" class="button button--secondary button--small" type="button" hidden>Show more rows</button>
+        </div>
       </div>
       <button id="productionCommitButton" class="button button--primary button--small" type="button" hidden>Save accepted results</button>
     </div>

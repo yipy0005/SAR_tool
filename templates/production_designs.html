@@ -1,48 +1,105 @@
 {% extends "production_workspace_base.html" %}
-{% block content %}
-{% if project %}
-<section class="production-page-heading"><div><div class="section-kicker">CHOOSE NEXT · REVIEW QUEUE</div><h2>Choose the next question to test</h2><p class="panel-subtitle">Review the evidence first, then decide whether a suggested question, a written hypothesis, or a design candidate is useful. Every item here remains untested.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Medicinal-chemistry decisions are safer when the proposed molecule or assay change answers a named uncertainty instead of following a pattern blindly.</p></div><div class="page-actions"><a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='analysis', project_id=project.id) }}">Open Find patterns</a><a class="button button--secondary button--small" href="{{ url_for('production_workspace', view='explore', project_id=project.id) }}">Open Compare</a></div></section>
+{% import "_sar_macros.html" as ui %}
+{% block about %}
 <section class="production-reading-guide" aria-label="How to read Choose next">
   <div><strong>Suggested question</strong><span>A computer-generated prompt about an evidence gap.</span><em>Review its cited results; it is not a recommendation to accept automatically.</em></div>
   <div><strong>Hypothesis</strong><span>A human-written statement that can be tested.</span><em>It records an idea, not a confirmed explanation.</em></div>
-  <div><strong>Design candidate</strong><span>A proposed experiment or chemical design for review.</span><em>It is not an experimental result and cannot be marked confirmed here.</em></div>
+  <div><strong>Design candidate</strong><span>A proposed compound or experiment for review.</span><em>It is not an experimental result and cannot be marked confirmed here.</em></div>
 </section>
+{% endblock %}
+{% block content %}
+{% if project %}
+    {% set evidence_options = [] %}
+    {% for summary in measurement_summaries | sort(attribute='registration_id,compatibility_key') %}{% set _ = evidence_options.append({"id": summary.id, "compound_id": summary.compound_id, "compound": summary.registration_id, "group": "Summaries", "label": (summary.compatibility_key | endpoint_name) ~ " · " ~ (summary.value | fmt_measure(summary.unit or summary.canonical_unit, summary.summary_qualifier)) ~ " · n=" ~ (summary.eligible_measurement_count + summary.censored_measurement_count + summary.missing_measurement_count)}) %}{% endfor %}
+    {% for cliff in activity_cliffs %}{% set _ = evidence_options.append({"id": cliff.id, "compound_id": cliff.compound_a_id, "other_compound_id": cliff.compound_b_id, "compound": cliff.compound_a_registration_id, "group": "Activity cliffs", "label": "Cliff " ~ cliff.compound_a_registration_id ~ " → " ~ cliff.compound_b_registration_id ~ " · " ~ (cliff.assay_compatibility_key | endpoint_name) ~ " " ~ (cliff.effect_value | fmt_delta(cliff.effect_unit))}) %}{% endfor %}
+    {% for item in selectivity_observations %}{% set _ = evidence_options.append({"id": item.id, "compound_id": item.compound_id, "compound": item.registration_id, "group": "Selectivity", "label": "Selectivity margin " ~ (item.selectivity_delta | fmt_delta(item.canonical_unit)) ~ " · " ~ (item.status | humanize)}) %}{% endfor %}
+    {% for item in translation_observations %}{% set _ = evidence_options.append({"id": item.id, "compound_id": item.compound_id, "compound": item.registration_id, "group": "Cellular translation", "label": "Biochemical → cellular drop " ~ (item.translation_loss | fmt_number(item.canonical_unit)) ~ " · " ~ (item.status | humanize)}) %}{% endfor %}
+    {% set evidence_pages = {"Summaries": "summaries", "Activity cliffs": "analysis", "Selectivity": "analysis", "Cellular translation": "analysis"} %}
+    {% set evidence_lookup = {} %}{% for option in evidence_options %}{% set _ = evidence_lookup.update({option.id: option}) %}{% endfor %}
+    {% macro evidence_links(ids, lookup, pages, project_id) -%}
+    {%- macro link(evidence_id) -%}{% set option = lookup.get(evidence_id) %}<li>{% if option %}<a href="{{ url_for('production_workspace', view=pages[option.group], project_id=project_id) }}#ev-{{ evidence_id }}" title="{{ evidence_id }}"><span class="evidence-links__group">{{ option.group }}</span>{% if option.group != 'Activity cliffs' %}{{ option.compound }} · {% endif %}{{ option.label }}</a>{% else %}<a href="{{ url_for('production_workspace', view='evidence', project_id=project_id) }}#ev-{{ evidence_id }}" title="{{ evidence_id }}"><span class="evidence-links__group">{{ 'Measurement' if evidence_id.startswith('msr_') else 'Record' }}</span>Open in Check results</a>{% endif %}</li>{%- endmacro -%}
+    {%- if ids -%}<ul class="evidence-links">{% for evidence_id in ids[:4] %}{{ link(evidence_id) }}{% endfor %}</ul>{% if ids|length > 4 %}<details class="evidence-links__more"><summary>{{ ids|length - 4 }} more</summary><ul class="evidence-links">{% for evidence_id in ids[4:] %}{{ link(evidence_id) }}{% endfor %}</ul></details>{% endif %}
+    {%- else -%}—{%- endif -%}
+    {%- endmacro %}
+<section class="production-focus-heading" aria-labelledby="productionDesignsHeading"><div><div class="section-kicker">CHOOSE NEXT</div><h2 id="productionDesignsHeading">Review the next evidence-backed question</h2><p class="panel-subtitle">Start with a generated question, inspect its cited evidence, and decide whether it deserves a hypothesis or proposed experiment. Every item here remains untested.</p></div><span class="status-badge status-badge--warn">review required</span></section>
 <section class="panel design-review-panel" id="productionRecommendations">
-  <div class="panel-header"><div><div class="section-kicker">01 · SUGGESTED QUESTIONS <span class="production-technical-label">generated evidence gaps</span> <span class="status-badge status-badge--warn">review required</span></div><h2>Suggested questions to review</h2><p class="panel-subtitle">These prompts are generated from saved heuristic observations. Open their cited evidence before deciding whether a question is worth testing.</p><p class="chemistry-why"><strong>Why in chemistry</strong>An evidence gap can identify what to measure next, but a chemist must decide whether the missing context is relevant to mechanism, exposure, selectivity, or synthesis.</p></div></div>
-  {% for recommendation in recommendations %}<article class="design-review-item"><strong>{{ recommendation.title }}</strong><span>{{ recommendation.status }}</span><p>{{ recommendation.rationale }}</p><small>Based on uploaded or calculated evidence: <code>{{ recommendation.evidence_ids | join(', ') }}</code></small></article>{% else %}<div class="empty-state">No suggested questions are awaiting review.</div>{% endfor %}
+  <div class="panel-header"><div><div class="section-kicker">01 · SUGGESTED QUESTIONS <span class="production-technical-label">generated evidence gaps</span> <span class="status-badge status-badge--warn">review required</span></div><h2>Suggested questions to review</h2><p class="panel-subtitle">These prompts are generated from saved heuristic observations. Open their cited evidence before deciding whether a question is worth testing.</p></div></div>
+  <div data-recommendation-list>{% for recommendation in recommendations %}<article class="design-review-item"><strong>{{ recommendation.title }}</strong><span>{{ recommendation.status | humanize }}</span><p>{{ recommendation.rationale }}</p><div class="design-review-item__evidence"><small>Cited evidence</small>{{ evidence_links(recommendation.evidence_ids, evidence_lookup, evidence_pages, project.id) }}</div></article>{% else %}<div class="empty-state">No suggested questions are awaiting review.{% if counts.analysis_runs == 0 %} Run the pattern checks on Find patterns to generate evidence-gap questions.{% endif %}</div>{% endfor %}</div>
+</section>
+<details class="production-guided-advanced production-design-secondary">
+  <summary>Review tracked questions and proposed experiments</summary>
+<section class="panel design-review-panel">
+  <div class="panel-header"><div><div class="section-kicker">02 · QUESTIONS <span class="production-technical-label">hypotheses</span> <span class="status-badge status-badge--warn">untested</span></div><h2>Questions already being tracked</h2><p class="panel-subtitle">These are statements recorded by people in the project. They remain open questions until a future experiment tests them.</p></div></div>
+  <div class="matrix-wrap"><table class="evidence-table"><thead><tr><th>Question</th><th>Why it was raised</th><th>Status</th><th>Created</th></tr></thead><tbody>{% for item in hypotheses %}<tr><td>{{ item.statement }}</td><td>{{ item.rationale or '—' }}</td><td>{{ item.status | humanize }}</td><td>{{ (item.created_at or '')[:10] }}</td></tr>{% else %}<tr><td colspan="4">No questions have been saved yet.</td></tr>{% endfor %}</tbody></table></div>
 </section>
 <section class="panel design-review-panel">
-  <div class="panel-header"><div><div class="section-kicker">02 · QUESTIONS <span class="production-technical-label">hypotheses</span> <span class="status-badge status-badge--warn">untested</span></div><h2>Questions already being tracked</h2><p class="panel-subtitle">These are statements recorded by people in the project. They remain open questions until a future experiment tests them.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Writing the expected structural or biological relationship down makes the next assay capable of supporting or challenging the idea.</p></div></div>
-  <div class="matrix-wrap"><table class="evidence-table"><thead><tr><th>Question</th><th>Why it was raised</th><th>Status</th><th>Created</th></tr></thead><tbody>{% for item in hypotheses %}<tr><td>{{ item.statement }}</td><td>{{ item.rationale or '—' }}</td><td>{{ item.status }}</td><td>{{ item.created_at }}</td></tr>{% else %}<tr><td colspan="4">No questions have been saved yet.</td></tr>{% endfor %}</tbody></table></div>
-</section>
-<section class="panel design-review-panel">
-  <div class="panel-header"><div><div class="section-kicker">03 · PROPOSED EXPERIMENTS <span class="production-technical-label">CURATED DESIGN QUEUE</span> <span class="status-badge status-badge--warn">untested</span></div><h2>Design candidates ready for review</h2><p class="panel-subtitle">These curated candidates are still untested. Check the supporting evidence, feasibility, ranking components, and uncertainty before treating one as a next experiment.</p><p class="chemistry-why"><strong>Why in chemistry</strong>A candidate is useful only when its proposed change, synthetic or assay feasibility, expected outcome, and failure mode are explicit.</p></div></div>
-  <div class="matrix-wrap"><table class="evidence-table"><thead><tr><th>Rank</th><th>Candidate</th><th>Purpose</th><th>Feasibility</th><th>Score</th><th>Uncertainty</th><th>Evidence</th></tr></thead><tbody>{% for candidate in design_candidates %}<tr><td><strong>{{ candidate.rank or loop.index }}</strong></td><td>{{ candidate.title }}</td><td>{{ candidate.category }}</td><td>{{ candidate.feasibility_status }}</td><td>{{ candidate.ranking_score }}</td><td>{{ candidate.uncertainty }}</td><td><code>{{ candidate.evidence_ids | join(', ') }}</code></td></tr>{% else %}<tr><td colspan="7">No proposed experiment has been saved yet.</td></tr>{% endfor %}</tbody></table></div>
+  <div class="panel-header"><div><div class="section-kicker">03 · PROPOSED EXPERIMENTS <span class="production-technical-label">CURATED DESIGN QUEUE</span> <span class="status-badge status-badge--warn">untested</span></div><h2>Design candidates ready for review</h2><p class="panel-subtitle">These curated candidates are still untested. Check the supporting evidence, feasibility, ranking components, and uncertainty before treating one as a next experiment.</p></div></div>
+  <div class="matrix-wrap"><table class="evidence-table"><thead><tr><th>Rank</th><th>Candidate</th><th>Purpose</th><th>Feasibility</th><th>Score</th><th>Uncertainty</th><th>Evidence</th></tr></thead><tbody>{% for candidate in design_candidates %}<tr><td><strong>{{ candidate.rank or loop.index }}</strong></td><td>{{ candidate.title }}</td><td>{{ candidate.category | humanize }}</td><td>{{ candidate.feasibility_status | humanize }}</td><td class="numeric">{{ candidate.ranking_score | fmt_number(digits=2) }}</td><td>{{ candidate.uncertainty }}</td><td>{{ evidence_links(candidate.evidence_ids, evidence_lookup, evidence_pages, project.id) }}</td></tr>{% else %}<tr><td colspan="7">No proposed experiment has been saved yet.</td></tr>{% endfor %}</tbody></table></div>
 </section>
 <section class="design-create-section" aria-labelledby="designCreateHeading">
-  <div class="production-page-heading"><div><div class="section-kicker">04 · CREATE AFTER REVIEW</div><h2 id="designCreateHeading">Add a question or proposed experiment</h2><p class="panel-subtitle">Both forms are optional. Link each entry to project evidence and state what remains uncertain.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Linking an idea to evidence makes the next molecule or assay condition auditable and helps distinguish a testable question from a confirmed explanation.</p></div></div>
-  <div class="design-workflow-grid">
+  <div class="production-page-heading"><div><div class="section-kicker">04 · CREATE AFTER REVIEW</div><h2 id="designCreateHeading">Add a question or proposed experiment</h2><p class="panel-subtitle">Both forms are optional. Link each entry to project evidence and state what remains uncertain.</p></div></div>
+  <details class="production-guided-advanced design-create-details">
+    <summary>Add a question or proposed experiment <small>Optional · link it to saved evidence</small></summary>
+    <div class="design-workflow-grid">
     <form id="productionHypothesisForm" class="panel design-workflow-card">
-      <div class="section-kicker">OPTIONAL QUESTION <span class="production-technical-label">hypothesis</span></div><h2>Write a testable question</h2><p class="panel-subtitle">State what you think may be true and why the current evidence makes it worth checking.</p><p class="chemistry-why"><strong>Why in chemistry</strong>A clear hypothesis connects a structural change or assay context to an expected response, so the next experiment can be discriminating.</p>
+      <div class="section-kicker">OPTIONAL QUESTION <span class="production-technical-label">hypothesis</span></div><h2>Write a testable question</h2><p class="panel-subtitle">State what you think may be true and why the current evidence makes it worth checking.</p>
       <label for="productionHypothesisStatement">Question or statement</label><input id="productionHypothesisStatement" name="statement" minlength="8" required placeholder="A change may…">
       <label for="productionHypothesisRationale">Why ask this?</label><textarea id="productionHypothesisRationale" name="rationale" rows="5" placeholder="Cite the evidence and uncertainty."></textarea>
-      <button class="button button--primary button--small" type="submit">Save question</button><div id="productionHypothesisStatus" class="production-design-status" role="status" aria-live="polite"></div>
+      <div class="page-actions"><button class="button button--primary button--small" type="submit">Save question</button></div><div id="productionHypothesisStatus" class="production-design-status" role="status" aria-live="polite"></div>
     </form>
+    {% set design_sites = (rgroup_assignments | map(attribute='display_positions') | select | first) if rgroup_assignments else [] %}{% set design_sites = design_sites or [] %}
+    {% set compound_groups = {} %}{% for item in rgroup_assignments %}{% set groups = {} %}{% for group in item.display_groups %}{% set _ = groups.update({group.label: group.name or group.smiles}) %}{% endfor %}{% set _ = compound_groups.update({item.compound_id: groups}) %}{% endfor %}
+    <script id="productionDesignData" type="application/json">{{ {"evidence": evidence_options, "sites": design_sites | map(attribute='label') | list, "compoundGroups": compound_groups} | tojson }}</script>
     <form id="productionDesignForm" class="panel design-workflow-card">
-      <div class="section-kicker">OPTIONAL PROPOSED EXPERIMENT <span class="production-technical-label">design candidate</span></div><h2>Describe a candidate for review</h2><p class="panel-subtitle">Record what could be tested, what result you expect, and what could make the idea wrong. It remains untested.</p><p class="chemistry-why"><strong>Why in chemistry</strong>Capturing the parent compound, purpose, expected result, and uncertainty makes a proposed analogue or assay change reviewable before resources are committed.</p>
+      <div class="section-kicker">OPTIONAL PROPOSED COMPOUND OR EXPERIMENT <span class="production-technical-label">design candidate</span></div><h2>Describe a candidate for review</h2><p class="panel-subtitle">Start from a parent compound, edit its SMILES, and tick the saved results that support the idea. It remains untested.</p>
       <div class="production-explorer-form-grid"><label>Purpose<select name="category"><option value="exploit">Build on a useful signal</option><option value="test">Test a question</option><option value="resolve">Resolve a conflict</option><option value="fill">Fill an evidence gap</option><option value="explore">Explore a new direction</option></select></label><label>Feasibility<select name="feasibility_status"><option value="unreviewed">Not reviewed</option><option value="tractable">Looks feasible</option><option value="review">Needs review</option></select></label></div>
-      <label>Parent compound<select name="parent_compound_id"><option value="">No parent selected</option>{% for compound in compounds %}<option value="{{ compound.id }}">{{ compound.registration_id }}</option>{% endfor %}</select></label>
-      <label>Title<input name="title" minlength="8" required placeholder="Test a supported change"></label>
-      <label>Evidence for it<textarea name="rationale" rows="2" minlength="8" required placeholder="What saved result supports this idea?"></textarea></label>
+      <fieldset class="design-structure">
+        <legend>Structure</legend>
+        <div class="design-structure__grid">
+          <div class="design-structure__fields">
+            <label>Parent compound<select name="parent_compound_id" data-design-parent><option value="">No parent selected</option>{% for compound in compounds | sort(attribute='registration_id') %}<option value="{{ compound.id }}" data-smiles="{{ compound.isomeric_smiles }}">{{ compound.registration_id }}</option>{% endfor %}</select></label>
+            <label>Proposed structure (SMILES) <em>optional</em><textarea name="structure_smiles" rows="2" spellcheck="false" autocomplete="off" data-design-smiles placeholder="Choose a parent to start from its SMILES, then edit"></textarea></label>
+            {% if design_sites %}
+            <div class="design-swap" data-design-swap role="group" aria-labelledby="designSwapLabel">
+              <strong id="designSwapLabel">Swap a substituent</strong>
+              <div class="design-swap__row">
+                <label>Site<select data-design-site>{% for site in design_sites %}<option value="{{ site.label }}">{{ site.label }}</option>{% endfor %}</select></label>
+                <label>Replace with<select data-design-replacement><option value="H">H (remove)</option>{% for item in common_substituents %}<option value="{{ item.smiles }}">{{ item.name }}</option>{% endfor %}<option value="custom">Other (SMILES with *)…</option></select></label>
+                <label data-design-replacement-custom-wrap hidden>Group SMILES<input data-design-replacement-custom placeholder="e.g. *C1CC1" spellcheck="false" autocomplete="off"></label>
+                <button class="button button--secondary button--small" type="button" data-design-apply-swap>Apply</button>
+              </div>
+              <small class="design-structure__hint" data-design-site-current>Sites are the same R-positions as the Find patterns table. Swaps apply to the proposed structure, so you can make several in a row.</small>
+            </div>
+            {% endif %}
+            <div class="page-actions"><button class="button button--secondary button--small" type="button" data-design-copy-parent disabled>Start from parent SMILES</button><button class="button button--secondary button--small" type="button" data-design-clear-structure>Clear structure</button></div>
+            <small class="design-structure__hint">{% if design_sites %}For other changes, e{% else %}E{% endif %}dit the SMILES directly (for example replace <code>F</code> with <code>Cl</code>). The drawing updates as you type and is checked with RDKit before saving. You can also paste SMILES from ChemDraw, Marvin, or Ketcher.</small>
+          </div>
+          <div class="design-structure__preview-wrap">
+            <div class="design-structure__preview-pair">
+              <figure><figcaption>Parent</figcaption><div class="design-structure__preview" data-design-parent-preview><span>No parent selected</span></div></figure>
+              <figure><figcaption>Proposed</figcaption><div class="design-structure__preview" data-design-preview aria-live="polite"><span>No structure yet</span></div></figure>
+            </div>
+            <p class="design-structure__status" data-design-structure-status role="status" aria-live="polite"></p>
+          </div>
+        </div>
+      </fieldset>
+      <label>Title<input name="title" minlength="8" required placeholder="e.g. Replace 4-F with 4-Cl on POS-004"></label>
+      <fieldset class="design-evidence" data-design-evidence>
+        <legend>Supporting evidence <span class="design-evidence__count" data-design-evidence-count>0 selected</span></legend>
+        <div class="design-evidence__toolbar"><label class="sar-matrix-toolbar__check"><input type="checkbox" data-design-evidence-all> <span>Show evidence for all compounds</span></label></div>
+        <div class="design-evidence__list" data-design-evidence-list><p class="design-evidence__empty">Choose a parent compound to list its saved results, or show evidence for all compounds.</p></div>
+        <details class="design-evidence__manual"><summary>Add other evidence IDs</summary><label>Evidence IDs <em>comma separated</em><input name="evidence_ids" placeholder="measurement, summary, or analysis IDs"></label></details>
+      </fieldset>
+      <label>Why this compound?<textarea name="rationale" rows="2" minlength="8" required placeholder="Which saved result supports this idea?"></textarea></label>
       <label>Question it tests<textarea name="hypothesis" rows="2" minlength="8" required placeholder="What remains untested?"></textarea></label>
-      <label>Expected outcome<textarea name="expected_outcome" rows="2" minlength="8" required placeholder="What would this clarify?"></textarea></label>
+      <label>Expected outcome<textarea name="expected_outcome" rows="2" minlength="8" required placeholder="e.g. IC50 pIC50 ≥ 7.5 with cellular drop < 1 log"></textarea></label>
       <label>Uncertainty<textarea name="uncertainty" rows="2" minlength="8" required placeholder="What could make this wrong?"></textarea></label>
-      <label>Evidence IDs<input name="evidence_ids" required placeholder="measurement_id, summary_id, analysis_id"></label>
-      <label>Structure SMILES <em>optional</em><input name="structure_smiles" placeholder="Leave blank when not designed"></label>
-      <button class="button button--primary button--small" type="submit">Save proposed experiment</button><div id="productionDesignStatus" class="production-design-status" role="status" aria-live="polite"></div>
+      <button class="button button--primary button--small" type="submit">Save proposed candidate</button><div id="productionDesignStatus" class="production-design-status" role="status" aria-live="polite"></div>
     </form>
-  </div>
+    </div>
+  </details>
 </section>
+</details>
 {% else %}
 <section class="panel"><div class="empty-state"><strong>No project selected.</strong><span>Return to Start after creating a production project.</span></div></section>
 {% endif %}

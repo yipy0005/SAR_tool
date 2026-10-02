@@ -45,13 +45,26 @@
     return Number.isFinite(number) ? number : null;
   };
 
-  const formatNumber = (value, digits = 2) => {
+  const F = window.SARFormat;
+  const formatNumber = (value, digits = 2, unit = "") => {
     const number = numeric(value);
     if (number === null) return "—";
-    return number.toFixed(digits).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+    if (F && unit) return F.number(number, unit);
+    // Fixed decimals without a unit (similarities, effects) so columns line up: 0.80, not 0.8.
+    return number.toFixed(digits);
+  };
+  const displayUnit = (unit) => (F ? F.unit(unit) : String(unit || ""));
+  const SUBSCRIPT = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉" };
+  // Compact formula for the changed atoms of a matched pair, e.g. ["F","F","F","C"] → "CF₃".
+  const atomFormula = (symbols) => {
+    const counts = new Map();
+    (symbols || []).forEach((symbol) => { const key = String(symbol || "").trim(); if (key) counts.set(key, (counts.get(key) || 0) + 1); });
+    if (!counts.size) return "H";
+    const order = [...(counts.has("C") ? ["C"] : []), ...[...counts.keys()].filter((key) => key !== "C").sort()];
+    return order.map((key) => `${key}${counts.get(key) > 1 ? String(counts.get(key)).split("").map((d) => SUBSCRIPT[d]).join("") : ""}`).join("");
   };
 
-  const endpointName = (key) => String(key || "Unknown test/result type")
+  const endpointName = (key) => String(key || "Unknown assay")
     .replace(/:import-v1$/, "")
     .replaceAll("_", " ");
 
@@ -109,7 +122,7 @@
     const raw = record.raw_value_text || record.missing_reason || "—";
     const qualifier = record.qualifier && record.qualifier !== "=" ? `${record.qualifier} ` : "";
     if (status === "missing") return `No result${record.missing_reason ? `: ${record.missing_reason}` : ""}`;
-    return `${qualifier}${raw} ${record.unit_ucum || ""}`.trim();
+    return `${qualifier}${raw} ${displayUnit(record.unit_ucum)}`.trim();
   };
 
   const summaryLabel = (record) => {
@@ -119,9 +132,9 @@
     const value = valueForRecord(record, "summary");
     const unit = unitForRecord(record, "summary");
     const qualifier = record.summary_qualifier && record.summary_qualifier !== "=" ? `${record.summary_qualifier} ` : "";
-    if (value !== null) return `${qualifier}${formatNumber(value)} ${unit}`.trim();
-    if (record.lower_bound !== null && record.lower_bound !== undefined) return `At least ${formatNumber(record.lower_bound)} ${unit}`.trim();
-    if (record.upper_bound !== null && record.upper_bound !== undefined) return `At most ${formatNumber(record.upper_bound)} ${unit}`.trim();
+    if (value !== null) return `${qualifier}${formatNumber(value, 2, unit)} ${displayUnit(unit)}`.trim();
+    if (record.lower_bound !== null && record.lower_bound !== undefined) return `At least ${formatNumber(record.lower_bound, 2, unit)} ${displayUnit(unit)}`.trim();
+    if (record.upper_bound !== null && record.upper_bound !== undefined) return `At most ${formatNumber(record.upper_bound, 2, unit)} ${displayUnit(unit)}`.trim();
     return resultStateLabel(status);
   };
 
@@ -136,6 +149,7 @@
           name: endpointName(name),
           rawName: name || "unknown",
           unit: unit || "",
+          unitLabel: displayUnit(unit || ""),
         });
       }
       return definitions.get(id);
@@ -190,8 +204,8 @@
   };
 
   const endpointLabel = (endpoint) => endpoint
-    ? `${endpoint.name} · ${endpoint.kind === "summary" ? "calculated result" : "uploaded result"}${endpoint.unit ? ` · ${endpoint.unit}` : ""}`
-    : "No test/result selected";
+    ? `${endpoint.name} · ${endpoint.kind === "summary" ? "calculated result" : "uploaded result"}${endpoint.unit ? ` · ${endpoint.unitLabel}` : ""}`
+    : "No assay selected";
 
   const endpointCompatibilityKey = (endpoint) => {
     if (!endpoint) return "";
@@ -240,7 +254,7 @@
   const descriptorValue = (profile, key) => profile?.descriptors?.[key]?.value ?? profile?.descriptors?.[key] ?? null;
 
   const endpointMeta = (endpoint) => {
-    if (!endpoint) return "Choose a test/result type";
+    if (!endpoint) return "Choose a assay";
     const stats = endpointStats(endpoint);
     return `${stats.observed} exact · ${stats.censored} threshold · ${stats.missing} no result · ${stats.review} review`;
   };
@@ -270,18 +284,30 @@
   const defaultB = endpoints.find((endpoint) => endpoint.kind === "summary" && endpoint.rawName.startsWith("Cellular"))?.id
     || endpoints.find((endpoint) => endpoint.id !== defaultA)?.id
     || "none";
-  const initialA = endpointById.has(savedState.endpointA) ? savedState.endpointA : defaultA;
-  const initialB = savedState.endpointB === "none" || endpointById.has(savedState.endpointB)
-    ? savedState.endpointB
-    : defaultB;
+  const comparisonSteps = ["import", "configure", "filter", "compare", "evidence"];
+  const urlState = new URLSearchParams(window.location.search);
+  const requestedA = urlState.get("endpoint_a") || "";
+  const requestedB = urlState.get("endpoint_b") || "";
+  const requestedStage = urlState.get("stage") || "";
+  const requestedCoverage = urlState.get("coverage") || "";
+  const requestedQuery = urlState.get("q");
+  const requestedSelected = urlState.get("selected") || "";
+  const initialA = endpointById.has(requestedA)
+    ? requestedA
+    : endpointById.has(savedState.endpointA) ? savedState.endpointA : defaultA;
+  const initialB = requestedB === "none" || endpointById.has(requestedB)
+    ? requestedB
+    : savedState.endpointB === "none" || endpointById.has(savedState.endpointB)
+      ? savedState.endpointB
+      : defaultB;
 
   const state = {
-    step: ["import", "configure", "filter", "compare", "evidence"].includes(savedState.step) ? savedState.step : "import",
+    step: comparisonSteps.includes(requestedStage) ? requestedStage : (comparisonSteps.includes(savedState.step) ? savedState.step : "configure"),
     endpointA: initialA,
     endpointB: initialB || "none",
-    coverage: ["all", "endpoint-a", "both", "review"].includes(savedState.coverage) ? savedState.coverage : "all",
-    query: typeof savedState.query === "string" ? savedState.query : "",
-    selectedId: typeof savedState.selectedId === "string" ? savedState.selectedId : "",
+    coverage: ["all", "endpoint-a", "both", "review"].includes(requestedCoverage) ? requestedCoverage : (["all", "endpoint-a", "both", "review"].includes(savedState.coverage) ? savedState.coverage : "all"),
+    query: requestedQuery !== null ? requestedQuery : (typeof savedState.query === "string" ? savedState.query : ""),
+    selectedId: requestedSelected || (typeof savedState.selectedId === "string" ? savedState.selectedId : ""),
   };
 
   const elements = {
@@ -305,13 +331,25 @@
     exportBundle: document.querySelector("#productionExplorerExportBundle"),
   };
 
-  const stepOrder = ["import", "configure", "filter", "compare", "evidence"];
+  const stepOrder = comparisonSteps;
   const stepLabels = {
     import: "Choose data",
     configure: "Choose tests",
     filter: "Narrow list",
     compare: "Compare results",
     evidence: "Check source",
+  };
+
+  const navigateToStep = (step) => {
+    const params = new URLSearchParams();
+    params.set("project_id", projectId);
+    params.set("stage", step);
+    if (state.endpointA) params.set("endpoint_a", state.endpointA);
+    if (state.endpointB) params.set("endpoint_b", state.endpointB);
+    if (state.coverage) params.set("coverage", state.coverage);
+    if (state.query) params.set("q", state.query);
+    if (state.selectedId) params.set("selected", state.selectedId);
+    window.location.href = `/workspace/explore?${params.toString()}`;
   };
 
   const setStatus = (message, kind = "") => {
@@ -394,7 +432,7 @@
     const sources = recordSourceIds(record, endpoint?.kind);
     return `<div class="production-explorer-cell production-explorer-cell--${status}">
       <strong>${escapeHtml(value)}</strong>
-      <small>${escapeHtml(resultStateLabel(status))}${endpoint?.unit ? ` · ${escapeHtml(endpoint.unit)}` : ""}${sources.length ? ` · ${sources.length} source${sources.length === 1 ? "" : "s"}` : ""}</small>
+      <small>${escapeHtml(resultStateLabel(status))}${endpoint?.unit ? ` · ${escapeHtml(endpoint.unitLabel)}` : ""}${sources.length ? ` · ${sources.length} source${sources.length === 1 ? "" : "s"}` : ""}</small>
     </div>`;
   };
 
@@ -414,7 +452,7 @@
       <article class="production-explorer-endpoint-card production-explorer-endpoint-card--secondary">
         <span class="production-explorer-card-kicker">CURRENT PROJECT SNAPSHOT</span>
         <h3>${compounds.length} chemical${compounds.length === 1 ? "" : "s"} · ${measurements.length} uploaded result${measurements.length === 1 ? "" : "s"}</h3>
-        <p>${endpoints.length} test/result view${endpoints.length === 1 ? "" : "s"} are available. Calculated summaries are preferred when they exist, while uploaded results remain traceable.</p>
+        <p>${endpoints.length} assay view${endpoints.length === 1 ? "" : "s"} are available. Calculated summaries are preferred when they exist, while uploaded results remain traceable.</p>
         <span class="status-badge status-badge--good">project-scoped</span>
       </article>
     </div>
@@ -431,7 +469,7 @@
       <section class="production-explorer-subpanel">
         <div class="section-kicker">NEXT</div>
         <h3>Choose tests after saving</h3>
-        <p>After results are saved, choose a test/result type. Build calculated summaries when you need grouped values for a fair comparison.</p>
+        <p>After results are saved, choose a assay. Build calculated summaries when you need grouped values for a fair comparison.</p>
         <button class="button button--secondary button--small" type="button" data-explorer-go-step="configure">Continue to choose tests</button>
       </section>
     </div>
@@ -443,16 +481,16 @@
     const cards = [endpointA, endpointB].filter(Boolean).map((endpoint, index) => {
       const stats = endpointStats(endpoint);
       return `<article class="production-explorer-endpoint-card production-explorer-endpoint-card--${index === 0 ? "primary" : "secondary"}">
-        <span class="production-explorer-card-kicker">Test/result ${index === 0 ? "A" : "B"}</span>
+        <span class="production-explorer-card-kicker">Assay ${index === 0 ? "A" : "B"}</span>
         <h3>${escapeHtml(endpoint.name)}</h3>
-        <p>${escapeHtml(endpoint.kind === "summary" ? "Calculated grouped result" : "Uploaded result")}${endpoint.unit ? ` · ${escapeHtml(endpoint.unit)}` : ""}</p>
+        <p>${escapeHtml(endpoint.kind === "summary" ? "Calculated grouped result" : "Uploaded result")}${endpoint.unit ? ` · ${escapeHtml(endpoint.unitLabel)}` : ""}</p>
         <div class="production-explorer-card-stats"><strong>${stats.observed}</strong><span>exact</span><strong>${stats.censored}</strong><span>threshold</span><strong>${stats.missing}</strong><span>no result</span></div>
       </article>`;
     }).join("");
     const available = endpoints.map((endpoint) => {
       const stats = endpointStats(endpoint);
       return `<button class="production-explorer-endpoint-row" type="button" data-explorer-use-endpoint="${escapeHtml(endpoint.id)}" data-explorer-use-slot="${endpoint.id === state.endpointA ? "a" : endpoint.id === state.endpointB ? "b" : "a"}">
-        <span><strong>${escapeHtml(endpoint.name)}</strong><small>${escapeHtml(endpoint.kind === "summary" ? "calculated" : "uploaded")}${endpoint.unit ? ` · ${escapeHtml(endpoint.unit)}` : ""}</small></span>
+        <span><strong>${escapeHtml(endpoint.name)}</strong><small>${escapeHtml(endpoint.kind === "summary" ? "calculated" : "uploaded")}${endpoint.unit ? ` · ${escapeHtml(endpoint.unitLabel)}` : ""}</small></span>
         <span>${stats.observed}/${compounds.length} exact</span>
       </button>`;
     }).join("");
@@ -517,9 +555,9 @@
     const endpointA = endpointFor(state.endpointA);
     const endpointB = state.endpointB === "none" ? null : endpointFor(state.endpointB);
     const rows = filteredCompounds();
-    if (!endpointA || !endpointB) return `<div class="production-explorer-empty"><strong>Choose test/result B to compare results.</strong><span>Keep one test selected for a single-test table, or add a compatible second test for the comparison view.</span></div>`;
+    if (!endpointA || !endpointB) return `<div class="production-explorer-empty"><strong>Choose assay B to compare results.</strong><span>Keep one test selected for a single-test table, or add a compatible second test for the comparison view.</span></div>`;
     if (endpointA.unit && endpointB.unit && endpointA.unit !== endpointB.unit) {
-      return `<div class="production-explorer-warning"><strong>Comparison paused: units differ.</strong><span>${escapeHtml(endpointA.unit)} and ${escapeHtml(endpointB.unit)} cannot be plotted directly together. Choose tests with matching units or inspect them separately in the table.</span></div>`;
+      return `<div class="production-explorer-warning"><strong>Comparison paused: units differ.</strong><span>${escapeHtml(endpointA.unitLabel)} and ${escapeHtml(endpointB.unitLabel)} cannot be plotted directly together. Choose tests with matching units or inspect them separately in the table.</span></div>`;
     }
     const pairs = rows.map((compound) => ({
       compound,
@@ -556,8 +594,8 @@
         ${grid}
         <line x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${margin.left + plotWidth}" y2="${margin.top + plotHeight}" class="production-explorer-plot-axis"/><line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}" class="production-explorer-plot-axis"/>
         ${points}
-        <text x="${margin.left + plotWidth / 2}" y="${height - 12}" class="production-explorer-plot-label" text-anchor="middle">${escapeHtml(endpointA.name)} (${escapeHtml(endpointA.unit || "value")})</text>
-        <text x="18" y="${margin.top + plotHeight / 2}" class="production-explorer-plot-label" text-anchor="middle" transform="rotate(-90 18 ${margin.top + plotHeight / 2})">${escapeHtml(endpointB.name)} (${escapeHtml(endpointB.unit || "value")})</text>
+        <text x="${margin.left + plotWidth / 2}" y="${height - 12}" class="production-explorer-plot-label" text-anchor="middle">${escapeHtml(endpointA.name)} (${escapeHtml(endpointA.unitLabel || "value")})</text>
+        <text x="18" y="${margin.top + plotHeight / 2}" class="production-explorer-plot-label" text-anchor="middle" transform="rotate(-90 18 ${margin.top + plotHeight / 2})">${escapeHtml(endpointB.name)} (${escapeHtml(endpointB.unitLabel || "value")})</text>
       </svg>
       <div class="production-explorer-plot-note">${excluded} chemical${excluded === 1 ? "" : "s"} not plotted because the result is missing, threshold-only, or needs review. The result remains available in the table.</div>
     </div>`;
@@ -600,10 +638,10 @@
       ].join("")
       : tile("Properties", "No profile", "Run the persisted property analysis", "missing");
     const selectivityMarkup = selectedSelectivity
-      ? `<div class="production-explorer-analysis-detail"><strong>${escapeHtml(selectedSelectivity.status || "selectivity")}</strong><span>${escapeHtml(`${selectedSelectivity.primary_value ?? "—"} vs ${selectedSelectivity.comparator_value ?? "—"} ${selectedSelectivity.canonical_unit || ""}`)}</span><small>Δ ${escapeHtml(formatNumber(selectedSelectivity.selectivity_delta))} · ${escapeHtml(selectedSelectivity.evidence_status || "evidence-linked")}</small></div>`
+      ? `<div class="production-explorer-analysis-detail"><strong>${escapeHtml(selectedSelectivity.status || "selectivity")}</strong><span>${escapeHtml(`${formatNumber(selectedSelectivity.primary_value, 2, selectedSelectivity.canonical_unit)} vs ${formatNumber(selectedSelectivity.comparator_value, 2, selectedSelectivity.canonical_unit)} ${displayUnit(selectedSelectivity.canonical_unit)}`)}</span><small>Δ ${escapeHtml(formatNumber(selectedSelectivity.selectivity_delta))} · ${escapeHtml(selectedSelectivity.evidence_status || "evidence-linked")}</small></div>`
       : `<div class="production-explorer-analysis-empty">No selectivity observation matches Endpoint A context. Run or select a compatible comparator.</div>`;
     const translationMarkup = selectedTranslation
-      ? `<div class="production-explorer-analysis-detail"><strong>${escapeHtml(selectedTranslation.status || "translation")}</strong><span>${escapeHtml(`${selectedTranslation.biochemical_value ?? "—"} → ${selectedTranslation.cellular_value ?? "—"} ${selectedTranslation.canonical_unit || ""}`)}</span><small>Loss ${escapeHtml(formatNumber(selectedTranslation.translation_loss))} · ${escapeHtml(selectedTranslation.evidence_status || "evidence-linked")}</small></div>`
+      ? `<div class="production-explorer-analysis-detail"><strong>${escapeHtml(selectedTranslation.status || "translation")}</strong><span>${escapeHtml(`${formatNumber(selectedTranslation.biochemical_value, 2, selectedTranslation.canonical_unit)} → ${formatNumber(selectedTranslation.cellular_value, 2, selectedTranslation.canonical_unit)} ${displayUnit(selectedTranslation.canonical_unit)}`)}</span><small>Loss ${escapeHtml(formatNumber(selectedTranslation.translation_loss))} · ${escapeHtml(selectedTranslation.evidence_status || "evidence-linked")}</small></div>`
       : `<div class="production-explorer-analysis-empty">No cellular-translation observation matches the selected endpoint context.</div>`;
     const admeMarkup = selectedAdme
       ? `<div class="production-explorer-analysis-detail"><strong>${escapeHtml(selectedAdme.status || "ADME")}</strong><span>${escapeHtml((selectedAdme.observed_contexts || []).join(", ") || "No exact observed contexts")}</span><small>Censored: ${escapeHtml((selectedAdme.censored_contexts || []).join(", ") || "none")} · Missing: ${escapeHtml((selectedAdme.missing_contexts || []).join(", ") || "none")}</small></div>`
@@ -614,11 +652,11 @@
     const mmpMarkup = selectedMmpPairs.length
       ? `<div class="production-explorer-table-wrap"><table class="production-explorer-analysis-table"><thead><tr><th>Pair</th><th>Transformation</th><th>Effect</th><th>Similarity</th></tr></thead><tbody>${selectedMmpPairs.map((pair) => {
         const transformation = pair.transformation || {};
-        return `<tr><td>${escapeHtml(`${pair.compound_a} ↔ ${pair.compound_b}`)}</td><td>${escapeHtml(`${(transformation.a || []).join(", ") || "—"} → ${(transformation.b || []).join(", ") || "—"}`)}</td><td>${escapeHtml(`${formatNumber(pair.effect_value)} ${pair.effect_unit || ""}`)}</td><td>${escapeHtml(formatNumber(pair.similarity))}</td></tr>`;
+        return `<tr><td>${escapeHtml(`${pair.compound_a} ↔ ${pair.compound_b}`)}</td><td>${escapeHtml(`${atomFormula(transformation.a)} → ${atomFormula(transformation.b)}`)}</td><td>${escapeHtml(`${F ? F.delta(pair.effect_value, pair.effect_unit) : formatNumber(pair.effect_value)}`)}</td><td>${escapeHtml(formatNumber(pair.similarity))}</td></tr>`;
       }).join("")}</tbody></table></div>`
       : `<div class="production-explorer-analysis-empty">No endpoint-compatible MMP pair links this compound. Censored and missing measurements remain excluded from MMP effects.</div>`;
     const cliffMarkup = selectedCliffs.length
-      ? `<div class="production-explorer-table-wrap"><table class="production-explorer-analysis-table"><thead><tr><th>Pair</th><th>Effect</th><th>Similarity</th><th>Evidence</th></tr></thead><tbody>${selectedCliffs.map((cliff) => `<tr><td>${escapeHtml(`${cliff.compound_a_registration_id} ↔ ${cliff.compound_b_registration_id}`)}</td><td>${escapeHtml(`${formatNumber(cliff.effect_value)} ${cliff.effect_unit || ""}`)}</td><td>${escapeHtml(formatNumber(cliff.similarity))}</td><td>${escapeHtml(cliff.evidence_status || "eligible observed summary")}</td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="production-explorer-table-wrap"><table class="production-explorer-analysis-table"><thead><tr><th>Pair</th><th>Effect</th><th>Similarity</th><th>Evidence</th></tr></thead><tbody>${selectedCliffs.map((cliff) => `<tr><td>${escapeHtml(`${cliff.compound_a_registration_id} ↔ ${cliff.compound_b_registration_id}`)}</td><td>${escapeHtml(`${F ? F.delta(cliff.effect_value, cliff.effect_unit) : formatNumber(cliff.effect_value)}`)}</td><td>${escapeHtml(formatNumber(cliff.similarity))}</td><td>${escapeHtml(cliff.evidence_status || "eligible observed summary")}</td></tr>`).join("")}</tbody></table></div>`
       : `<div class="production-explorer-analysis-empty">No endpoint-compatible activity cliff is linked to this compound.</div>`;
     const contradictionsMarkup = selectedContradictions.length
       ? selectedContradictions.map((item) => `<div class="production-explorer-analysis-detail production-explorer-analysis-detail--warning"><strong>${escapeHtml(item.status || "review")}</strong><span>${escapeHtml(item.compatibility_key || "endpoint context")}</span><small>${escapeHtml(item.reason || item.reconciliation_status || "Unreconciled evidence")}</small></div>`).join("")
@@ -659,7 +697,7 @@
       const record = recordFor(compound.registration_id, endpoint);
       return `<div class="production-explorer-evidence-value"><span>${escapeHtml(endpointLabel(endpoint))}</span><strong>${escapeHtml(endpoint.kind === "summary" ? summaryLabel(record) : rawLabel(record))}</strong><small>${escapeHtml(statusForRecord(record, endpoint.kind))} · ${recordSourceIds(record, endpoint.kind).length} source link${recordSourceIds(record, endpoint.kind).length === 1 ? "" : "s"}</small></div>`;
     }).join("");
-    const rawRows = measurements.filter((measurement) => measurement.registration_id === compound.registration_id).map((measurement) => `<tr><td>${escapeHtml(measurement.assay_name)}</td><td>${escapeHtml(rawLabel(measurement))}</td><td>${escapeHtml(`${measurement.canonical_value ?? "—"} ${measurement.canonical_unit || ""}`)}</td><td>${escapeHtml(measurement.qualifier || measurement.missing_reason || "—")}</td><td><code>${escapeHtml(measurement.source_row_id || measurement.id)}</code></td></tr>`).join("");
+    const rawRows = measurements.filter((measurement) => measurement.registration_id === compound.registration_id).map((measurement) => `<tr><td>${escapeHtml(measurement.assay_name)}</td><td>${escapeHtml(rawLabel(measurement))}</td><td>${escapeHtml(`${formatNumber(measurement.canonical_value, 2, measurement.canonical_unit)} ${displayUnit(measurement.canonical_unit)}`)}</td><td>${escapeHtml(measurement.qualifier || measurement.missing_reason || "—")}</td><td><code>${escapeHtml(measurement.source_row_id || measurement.id)}</code></td></tr>`).join("");
     const summaryRows = summaries.filter((summary) => summary.registration_id === compound.registration_id).map((summary) => `<tr><td>${escapeHtml(endpointName(summary.compatibility_key))}</td><td>${escapeHtml(summaryLabel(summary))}</td><td>${escapeHtml(summary.summary_state || "—")}</td><td>${escapeHtml(`${summary.eligible_measurement_count || 0} eligible · ${summary.censored_measurement_count || 0} censored · ${summary.missing_measurement_count || 0} missing`)}</td><td><code>${escapeHtml(summary.id)}</code></td></tr>`).join("");
     return `<div class="production-explorer-evidence">
       <div class="production-explorer-evidence-hero"><div class="production-explorer-evidence-structure">${compoundStructure(compound)}</div><div><span class="production-explorer-card-kicker">SELECTED COMPOUND</span><h3>${escapeHtml(compound.registration_id)}</h3><p>${escapeHtml(compound.isomeric_smiles || compound.canonical_smiles || "Validated structure")}</p><span class="status-badge status-badge--good">${escapeHtml(compound.data_origin || "imported")}</span></div></div>
@@ -716,8 +754,7 @@
   const attachWorkflowShortcuts = () => {
     elements.canvas?.querySelectorAll("[data-explorer-go-step]").forEach((button) => {
       button.addEventListener("click", () => {
-        state.step = button.dataset.explorerGoStep || "configure";
-        render();
+        navigateToStep(button.dataset.explorerGoStep || "configure");
       });
     });
     elements.canvas?.querySelectorAll("[data-explorer-jump-import]").forEach((button) => {
@@ -844,8 +881,7 @@
         ? `<span class="production-explorer-selection-label">Selected</span><strong>${escapeHtml(selected.registration_id)}</strong><button type="button" class="button button--secondary button--small" data-explorer-go-evidence>Inspect evidence</button>`
         : `<span class="production-explorer-selection-label">Selection</span><strong>No compound selected</strong><small>Select a row or plot point to pin evidence.</small>`;
       elements.selection.querySelector("[data-explorer-go-evidence]")?.addEventListener("click", () => {
-        state.step = "evidence";
-        render();
+        navigateToStep("evidence");
       });
     }
     setMessage(`${filteredCompounds().length} compound${filteredCompounds().length === 1 ? "" : "s"} match the current filter.`, "info");
@@ -995,19 +1031,16 @@
   });
   document.querySelectorAll("[data-explorer-step]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.step = button.dataset.explorerStep || "configure";
-      render();
+      navigateToStep(button.dataset.explorerStep || "configure");
     });
   });
   elements.back?.addEventListener("click", () => {
     const index = Math.max(0, stepOrder.indexOf(state.step) - 1);
-    state.step = stepOrder[index];
-    render();
+    navigateToStep(stepOrder[index]);
   });
   elements.next?.addEventListener("click", () => {
     const index = stepOrder.indexOf(state.step);
-    state.step = index === stepOrder.length - 1 ? stepOrder[0] : stepOrder[index + 1];
-    render();
+    navigateToStep(index === stepOrder.length - 1 ? stepOrder[0] : stepOrder[index + 1]);
   });
   elements.save?.addEventListener("click", () => persist());
   elements.sessionList?.addEventListener("change", (event) => {
