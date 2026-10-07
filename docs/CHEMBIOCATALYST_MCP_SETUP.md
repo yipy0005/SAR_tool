@@ -61,6 +61,8 @@ python3 sar_mcp_server.py --save-token
 
 Paste the token when asked (nothing appears on screen as you paste, which is normal) and press Enter. It is stored in `~/.config/sar-workbench/mcp.env`, readable only by you, and is never written into Kiro's settings file.
 
+You should see `Saved to ... (owner-only)`. That is all this step does; the connection is checked in step 6, once Kiro knows your server address.
+
 ## Step 5. Add it to Kiro
 
 Print the settings entry for Kiro. Replace `<SERVER>` with your address from the API tokens page:

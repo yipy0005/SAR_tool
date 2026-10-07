@@ -114,6 +114,11 @@ def save_token() -> int:
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write(f'SAR_MCP_TOKEN="{token}"\n')
     os.chmod(target, 0o600)
+    if not (os.environ.get("SAR_MCP_BASE_URL") or "").strip():
+        # The server address is chosen in the next step; checking the default local address now would
+        # only report a misleading problem.
+        print(f"Saved to {target} (owner-only). Next: print your Kiro entry with --print-kiro-config (see the setup guide).")
+        return 0
     print(f"Saved to {target} (owner-only). Checking the connection...")
     return check()
 

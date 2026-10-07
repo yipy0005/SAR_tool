@@ -430,3 +430,26 @@ def test_mcp_settings_read_the_token_and_certificate(tmp_path):
 def test_the_token_never_travels_over_plain_http_off_host():
     settings = Settings(base_url="http://10.0.0.5:8029", token="sarpat_" + "D" * 43)
     assert "plain HTTP" in (settings.transport_problem() or "")
+
+
+def test_save_token_stores_privately_and_only_checks_when_an_address_is_given(tmp_path, monkeypatch, capsys):
+    import stat
+    from unittest import mock
+
+    from sar_mcp import cli
+
+    target = tmp_path / "cfg" / "mcp.env"
+    token = "sarpat_" + "E" * 43
+    monkeypatch.setenv("SAR_MCP_CREDENTIALS_FILE", str(target))
+    monkeypatch.delenv("SAR_MCP_BASE_URL", raising=False)
+    with mock.patch("getpass.getpass", return_value=token), mock.patch.object(cli, "check", return_value=1) as check:
+        assert cli.save_token() == 0  # no address yet: nothing to check, and no scary message
+        check.assert_not_called()
+        monkeypatch.setenv("SAR_MCP_BASE_URL", "https://server.example.test:8029")
+        assert cli.save_token() == 1  # an address is known, so the connection is checked
+        check.assert_called_once()
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600 and stat.S_IMODE(target.parent.stat().st_mode) == 0o700
+    assert target.read_text() == f'SAR_MCP_TOKEN="{token}"\n'
+    assert token not in capsys.readouterr().out
+    with mock.patch("getpass.getpass", return_value="hunter2"):
+        assert cli.save_token() == 2
