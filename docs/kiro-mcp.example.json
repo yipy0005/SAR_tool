@@ -1,0 +1,32 @@
+{
+  "mcpServers": {
+    "sar-workbench": {
+      "command": "/ABSOLUTE/PATH/TO/SAR_tool/.pixi/envs/default/bin/python",
+      "args": [
+        "/ABSOLUTE/PATH/TO/SAR_tool/sar_mcp_server.py"
+      ],
+      "env": {
+        "SAR_MCP_BASE_URL": "http://127.0.0.1:5001",
+        "SAR_MCP_MODE": "analyze"
+      },
+      "autoApprove": [
+        "sar_status",
+        "sar_list_projects",
+        "sar_search_compounds",
+        "sar_get_compound",
+        "sar_list_endpoints",
+        "sar_list_measurements",
+        "sar_list_result_summaries",
+        "sar_standardize_structure",
+        "sar_substructure_search",
+        "sar_core_from_structure",
+        "sar_propose_substituent",
+        "sar_discover_series",
+        "sar_list_records",
+        "sar_get_analysis_run",
+        "sar_open_in_workbench"
+      ],
+      "disabled": false
+    }
+  }
+}

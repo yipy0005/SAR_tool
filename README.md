@@ -85,6 +85,19 @@ Ketcher runs in a same-origin iframe at `/ketcher/`. Only that frame's Content-S
 
 To upgrade, change `KETCHER_VERSION`, `RELEASE_URL` and `RELEASE_SHA256` together, then rerun the task. Ketcher is Apache-2.0; its licence and notice are in [`third_party/ketcher/`](third_party/ketcher/).
 
+## Use the workbench from an LLM (MCP)
+
+An MCP server lets an assistant such as Kiro search compounds, read results and start analyses through the web app's own API, with the same sign-in, project membership and audit trail as the browser. It needs no extra dependencies.
+
+```bash
+pixi run start-local        # the web app
+pixi run mcp-credentials    # once: stores your login in a private, owner-only file
+pixi run mcp-check          # test the connection
+pixi run mcp-config         # print the Kiro mcp.json entry to merge
+```
+
+Three permission modes (`SAR_MCP_MODE`): `read-only`, `analyze` (default, can store derived analysis runs) and `full` (can also create projects and import data). Approving recommendations, creating claims or series, and changing membership are never exposed. Tool results are sent to the model provider, so connect only projects you may share with it. See [`docs/MCP_GUIDE.md`](docs/MCP_GUIDE.md).
+
 ## Optional synthetic example-data setup
 
 For a Mac-only production-shaped smoke test, use the interactive Pixi command instead of the illustrative demo task:
