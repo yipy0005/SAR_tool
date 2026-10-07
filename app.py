@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, jsonify, redirect, render_template, request, g, send_from_directory, session, url_for
+from flask import Flask, Response, g, has_app_context, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from auth import (
@@ -483,7 +483,17 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             return jsonify(error="workspace_not_found", message="Unknown production workspace page."), 404
         _ensure_database(app)
         project = _get_project(app, request.args.get("project_id"))
+        # ?run=<analysis run id> shows that stored run instead of the latest of its kind.
+        run_notice = None
+        g.pinned_run = None
+        requested_run = request.args.get("run", "").strip()[:128]
+        if project is not None and requested_run:
+            run_notice = _requested_run(app, project["id"], requested_run)
+            if run_notice["state"] == "pinned":
+                g.pinned_run = {"id": run_notice["id"], "project_id": project["id"], "analysis_type": run_notice["analysis_type"]}
+            run_notice["clear_url"] = url_for("production_workspace", view=view, project_id=project["id"])
         context = _production_page_context(app, project)
+        context["run_notice"] = run_notice
         if view == "analysis" and project is not None and context.get("counts", {}).get("analysis_runs"):
             # Built only here: the fingerprint pairs are not needed on other pages.
             context.update(_production_pattern_explorer(project, context))
@@ -2022,6 +2032,53 @@ def _analysis_project_id(app: Flask, run_id: str) -> str | None:
     return row["project_id"] if row else None
 
 
+# Run types the workspace pages can show, and the name used in the "viewing a specific run" notice.
+PINNABLE_RUN_TYPES = {
+    "pharmacophore_rgroup": "Pharmacophore R-group",
+    "rgroup": "R-group",
+    "mmp": "Matched molecular pairs",
+    "activity_cliff": "Activity cliffs",
+    "selectivity": "Selectivity",
+    "properties": "Property profiles",
+    "cellular_translation": "Cellular translation",
+    "adme": "ADME panel",
+    "pareto": "Pareto ranking",
+    "contradictions": "Contradiction warnings",
+}
+
+
+def _pinned_run(project_id: str, analysis_type: str) -> str | None:
+    """Run id requested with ?run= for this page view when it is of this type, else None (show the latest)."""
+    pinned = g.get("pinned_run") if has_app_context() else None
+    if pinned and pinned["project_id"] == project_id and pinned["analysis_type"] == analysis_type:
+        return pinned["id"]
+    return None
+
+
+def _requested_run(app: Flask, project_id: str, run_id: str) -> dict[str, Any]:
+    """Describe a ?run= request. ``state`` is pinned (shown instead of the latest), unsupported or not_found."""
+    with read_connection(app.config["DATABASE_PATH"]) as connection:
+        row = connection.execute(
+            "SELECT id, analysis_type, algorithm_version, created_at FROM analysis_runs WHERE id = ? AND project_id = ?",
+            (run_id, project_id),
+        ).fetchone()
+        if row is None:
+            return {"state": "not_found", "id": run_id}
+        kind = row["analysis_type"]
+        notice = {"id": row["id"], "analysis_type": kind, "label": PINNABLE_RUN_TYPES.get(kind, kind),
+                  "created_at": row["created_at"], "algorithm_version": row["algorithm_version"]}
+        if kind not in PINNABLE_RUN_TYPES:
+            return {**notice, "state": "unsupported", "reason": "This kind of run has no view on the workspace pages."}
+        # The pharmacophore view can only draw runs made with the current algorithm version.
+        if kind == "pharmacophore_rgroup" and row["algorithm_version"] != PHARMACOPHORE_ANALYSIS_VERSION:
+            return {**notice, "state": "unsupported", "reason": "This run was made with an older algorithm version that this page can no longer draw."}
+        latest = connection.execute(
+            "SELECT id FROM analysis_runs WHERE project_id = ? AND analysis_type = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (project_id, kind),
+        ).fetchone()
+    return {**notice, "state": "pinned", "is_latest": bool(latest and latest["id"] == row["id"])}
+
+
 def _summary_project_id(app: Flask, summary_id: str) -> str | None:
     with read_connection(app.config["DATABASE_PATH"]) as connection:
         row = connection.execute(
@@ -2177,9 +2234,9 @@ def _production_pharmacophore_rgroup(app: Flask, project_id: str) -> dict[str, A
             SELECT id FROM analysis_runs
             WHERE project_id = ? AND analysis_type = 'pharmacophore_rgroup'
               AND algorithm_version = ?
-            ORDER BY created_at DESC, id DESC LIMIT 1
+            ORDER BY (id = ?) DESC, created_at DESC, id DESC LIMIT 1
             """,
-            (project_id, PHARMACOPHORE_ANALYSIS_VERSION),
+            (project_id, PHARMACOPHORE_ANALYSIS_VERSION, _pinned_run(project_id, "pharmacophore_rgroup")),
         ).fetchone()
     if run is None:
         return {"assignments": [], "positions": [], "data_origin": "derived"}
@@ -2206,11 +2263,11 @@ def _production_rgroup_assignments(app: Flask, project_id: str) -> list[dict[str
               AND ar.id = (
                   SELECT id FROM analysis_runs
                   WHERE project_id = ? AND analysis_type = 'rgroup'
-                  ORDER BY created_at DESC, id DESC LIMIT 1
+                  ORDER BY (id = ?) DESC, created_at DESC, id DESC LIMIT 1
               )
             ORDER BY c.registration_id
             """,
-            (project_id, project_id),
+            (project_id, project_id, _pinned_run(project_id, "rgroup")),
         ).fetchall()
     result = []
     for row in rows:
@@ -2315,12 +2372,12 @@ def _production_activity_cliffs(app: Flask, project_id: str) -> list[dict[str, A
               AND ar.id = (
                   SELECT id FROM analysis_runs
                   WHERE project_id = ? AND analysis_type = 'activity_cliff'
-                  ORDER BY created_at DESC, id DESC LIMIT 1
+                  ORDER BY (id = ?) DESC, created_at DESC, id DESC LIMIT 1
               )
             ORDER BY ABS(ac.effect_value) DESC, ac.id
             LIMIT 100
             """,
-            (project_id, project_id),
+            (project_id, project_id, _pinned_run(project_id, "activity_cliff")),
         ).fetchall()
     result = []
     for row in rows:
@@ -2337,9 +2394,9 @@ def _production_mmp(app: Flask, project_id: str) -> dict[str, Any]:
             """
             SELECT id FROM analysis_runs
             WHERE project_id = ? AND analysis_type = 'mmp'
-            ORDER BY created_at DESC, id DESC LIMIT 1
+            ORDER BY (id = ?) DESC, created_at DESC, id DESC LIMIT 1
             """,
-            (project_id,),
+            (project_id, _pinned_run(project_id, "mmp")),
         ).fetchone()
     if row is None:
         return {}
@@ -2385,11 +2442,11 @@ def _production_selectivity(app: Flask, project_id: str) -> list[dict[str, Any]]
               AND ar.id = (
                   SELECT id FROM analysis_runs
                   WHERE project_id = ? AND analysis_type = 'selectivity'
-                  ORDER BY created_at DESC, id DESC LIMIT 1
+                  ORDER BY (id = ?) DESC, created_at DESC, id DESC LIMIT 1
               )
             ORDER BY c.registration_id
             """,
-            (project_id, project_id),
+            (project_id, project_id, _pinned_run(project_id, "selectivity")),
         ).fetchall()
     result = []
     for row in rows:
@@ -2413,11 +2470,11 @@ def _production_property_profiles(app: Flask, project_id: str) -> list[dict[str,
               AND ar.id = (
                   SELECT id FROM analysis_runs
                   WHERE project_id = ? AND analysis_type = 'properties'
-                  ORDER BY created_at DESC, id DESC LIMIT 1
+                  ORDER BY (id = ?) DESC, created_at DESC, id DESC LIMIT 1
               )
             ORDER BY c.registration_id
             """,
-            (project_id, project_id),
+            (project_id, project_id, _pinned_run(project_id, "properties")),
         ).fetchall()
     result = []
     for row in rows:
@@ -2442,11 +2499,11 @@ def _production_translation_observations(app: Flask, project_id: str) -> list[di
               AND ar.id = (
                   SELECT id FROM analysis_runs
                   WHERE project_id = ? AND analysis_type = 'cellular_translation'
-                  ORDER BY created_at DESC, id DESC LIMIT 1
+                  ORDER BY (id = ?) DESC, created_at DESC, id DESC LIMIT 1
               )
             ORDER BY c.registration_id
             """,
-            (project_id, project_id),
+            (project_id, project_id, _pinned_run(project_id, "cellular_translation")),
         ).fetchall()
     result = []
     for row in rows:
@@ -2470,11 +2527,11 @@ def _production_adme_observations(app: Flask, project_id: str) -> list[dict[str,
               AND ar.id = (
                   SELECT id FROM analysis_runs
                   WHERE project_id = ? AND analysis_type = 'adme'
-                  ORDER BY created_at DESC, id DESC LIMIT 1
+                  ORDER BY (id = ?) DESC, created_at DESC, id DESC LIMIT 1
               )
             ORDER BY c.registration_id
             """,
-            (project_id, project_id),
+            (project_id, project_id, _pinned_run(project_id, "adme")),
         ).fetchall()
     result = []
     for row in rows:
@@ -2500,11 +2557,11 @@ def _production_pareto_observations(app: Flask, project_id: str) -> list[dict[st
               AND ar.id = (
                   SELECT id FROM analysis_runs
                   WHERE project_id = ? AND analysis_type = 'pareto'
-                  ORDER BY created_at DESC, id DESC LIMIT 1
+                  ORDER BY (id = ?) DESC, created_at DESC, id DESC LIMIT 1
               )
             ORDER BY c.registration_id
             """,
-            (project_id, project_id),
+            (project_id, project_id, _pinned_run(project_id, "pareto")),
         ).fetchall()
     result = []
     for row in rows:
@@ -2531,11 +2588,11 @@ def _production_contradictions(app: Flask, project_id: str) -> list[dict[str, An
               AND ar.id = (
                   SELECT id FROM analysis_runs
                   WHERE project_id = ? AND analysis_type = 'contradictions'
-                  ORDER BY created_at DESC, id DESC LIMIT 1
+                  ORDER BY (id = ?) DESC, created_at DESC, id DESC LIMIT 1
               )
             ORDER BY c.registration_id, co.compatibility_key
             """,
-            (project_id, project_id),
+            (project_id, project_id, _pinned_run(project_id, "contradictions")),
         ).fetchall()
     result = []
     for row in rows:

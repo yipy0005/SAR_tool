@@ -463,5 +463,24 @@
     }
   });
 
+  // ?find=<SMILES or SMARTS> (with optional ?find_format=auto|smiles|smarts) opens this dialog and runs that
+  // search, so a shared link shows exactly what the search returned. Read-only, like the dialog itself.
+  const linked = new URLSearchParams(window.location.search);
+  const linkedText = (linked.get("find") || "").trim().slice(0, 500);
+  const runLinkedSearch = () => {
+    const format = linked.get("find_format") || "auto";
+    open();
+    if (el.text) el.text.value = linkedText;
+    if (el.format) el.format.value = ["auto", "smiles", "smarts"].includes(format) ? format : "auto";
+    lastEdited = "text";
+    remember();
+    run();
+  };
+  if (linkedText) {
+    // Deferred page scripts register their result actions before DOMContentLoaded fires.
+    if (document.readyState === "complete") runLinkedSearch();
+    else document.addEventListener("DOMContentLoaded", runLinkedSearch, { once: true });
+  }
+
   window.SARStructureSearch = Object.freeze({ open, highlightKey, storeHighlight });
 })();

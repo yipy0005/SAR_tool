@@ -209,6 +209,20 @@ Every workspace page has **Find by structure**. Draw a fragment, or load a proje
 
 When Ketcher is installed (see the README), it is the default editor and supports atom lists such as `[F,Cl]`, R-group labels (matched as any substituent) and query bonds. The **Simple sketcher** tab is always available for plain drawings. Switching editors keeps the drawing only when the simple sketcher can show it; query features stay in Ketcher. Searches are read-only and are not saved to the project.
 
+### Links that open a specific view
+
+Every workspace page is `/workspace/<page>?project_id=<project id>`, where `<page>` is `overview` (Start), `evidence` (Check results), `summaries`, `explore` (Compare), `sar`, `analysis` (Find patterns) or `designs` (Choose next). These optional parameters make a link open on something specific. They only read; opening one changes nothing, and you must be signed in and a member of the project as usual.
+
+| Parameter | Page | Effect |
+| --- | --- | --- |
+| `run=<analysis run id>` | any | Shows that stored run instead of the latest run of its kind (R-group, pharmacophore R-group, MMP, activity cliffs, selectivity, cellular translation, ADME, Pareto, contradictions, properties). A notice at the top names the run and says whether a newer one exists. Other results on the page stay on their latest run. An unknown id, an id from another project, or a kind of run the pages do not show falls back to the latest results with a notice. |
+| `find=<SMILES or SMARTS>` and `find_format=auto\|smiles\|smarts` | any | Opens **Find by structure** and runs that search. Text is limited to 500 characters. |
+| `reference=<compound id>` | `sar` | Sets the SAR reference compound. |
+| `compare=<compound id>` with `#pattern-explorer` | `analysis` | Uses that compound as the pattern explorer's comparison. |
+| `endpoint_a`, `endpoint_b`, `stage` | `explore` | Chooses the two assays (as `summary\|<endpoint key>\|<unit>`) and the step. |
+
+The MCP server builds these links for you; see [`MCP_GUIDE.md`](MCP_GUIDE.md).
+
 ## 8. Compare prodrug–active pairs in bulk
 
 A prodrug-to-active-form link is a distinct relationship, not an ordinary scaffold transformation. The workbench does not infer this relationship from SMILES; provide the mapping explicitly.

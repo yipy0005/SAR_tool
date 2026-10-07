@@ -2363,3 +2363,11 @@ p.structure-search__editor-note { margin: 0; }
 .pattern-matrix__cell.is-selected { outline: 3px solid var(--text-strong); outline-offset: 1px; }
 .pattern-matrix__cell.is-match:not(.is-selected) { box-shadow: 0 0 0 2px var(--violet); }
 .pattern-explorer[data-highlight="on"] .pattern-matrix__cell:not(.is-match):not(.is-selected) { opacity: .35; }
+
+/* ?run=<id> links: say plainly when a page shows a specific stored run instead of the latest */
+.run-pin-notice { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 14px; padding: 10px 14px; border: 1px solid var(--blue); border-left-width: 4px; border-radius: 8px; background: var(--blue-soft); color: var(--text); font-size: 13px; }
+.run-pin-notice strong { color: var(--text-strong); font-family: var(--font-mono); font-size: 12px; }
+.run-pin-notice span { flex: 1 1 320px; color: var(--text-muted); line-height: 1.5; }
+.run-pin-notice a { color: var(--blue); font-weight: 600; white-space: nowrap; }
+.run-pin-notice--unsupported, .run-pin-notice--not_found { border-color: var(--orange); background: var(--orange-soft); }
+@media print { .run-pin-notice a { display: none; } }

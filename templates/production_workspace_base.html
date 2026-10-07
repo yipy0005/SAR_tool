@@ -105,6 +105,21 @@
         </div>
       </details>
       {% endif %}
+      {% if run_notice is defined and run_notice %}
+      <aside class="run-pin-notice run-pin-notice--{{ run_notice.state }}" id="runPinNotice" role="status">
+        {% if run_notice.state == 'pinned' %}
+        <strong>{{ run_notice.label }} run {{ run_notice.id[-8:] }}</strong>
+        <span>made {{ run_notice.created_at }} with {{ run_notice.algorithm_version }}. {% if run_notice.is_latest %}This is the latest {{ run_notice.label | lower }} run.{% else %}A newer {{ run_notice.label | lower }} run exists; this page shows the one you asked for.{% endif %} Everything else on this page is the latest result.</span>
+        {% elif run_notice.state == 'unsupported' %}
+        <strong>Run {{ run_notice.id[-8:] }} cannot be shown here</strong>
+        <span>{{ run_notice.reason }} Showing the latest results instead.</span>
+        {% else %}
+        <strong>Run not found</strong>
+        <span>No run with that id exists in this project. Showing the latest results instead.</span>
+        {% endif %}
+        <a href="{{ run_notice.clear_url }}">Show latest results</a>
+      </aside>
+      {% endif %}
       {% block content %}{% endblock %}
       {% if project %}{% include "_structure_search.html" %}{% endif %}
     </main>
