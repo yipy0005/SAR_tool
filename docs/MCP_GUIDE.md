@@ -1,6 +1,6 @@
 # Use the SAR Workbench from an LLM (MCP)
 
-The MCP server lets an assistant such as Kiro look up compounds, read results, run searches and start analyses in the web app. It signs in to the app the way you do, so project membership, CSRF protection and the audit trail all still apply. It uses only the Python standard library, so it adds no dependencies.
+The MCP server lets an assistant such as Kiro look up compounds, read results, run searches and start analyses in the web app. It signs in to the app the way you do (a password for a local copy, or an API token for the shared ChemBioCatalyst server), so project membership, CSRF protection and the audit trail all still apply. It uses only the Python standard library, so it adds no dependencies.
 
 ## Set up (once)
 
@@ -10,6 +10,21 @@ The MCP server lets an assistant such as Kiro look up compounds, read results, r
 4. Connect Kiro. This workspace already has `.kiro/settings/mcp.json`. For another workspace or user-level setup, run `pixi run mcp-config` and merge the printed entry into `.kiro/settings/mcp.json` (workspace) or `~/.kiro/settings/mcp.json` (user). [`docs/kiro-mcp.example.json`](kiro-mcp.example.json) shows the shape with placeholder paths. Then reconnect `sar-workbench` from the MCP Server view in Kiro.
 
 If the app runs without a login screen (`SAR_ENV` not `production`), skip step 2.
+
+## Using it with the ChemBioCatalyst server
+
+Users of the shared ChemBioCatalyst SAR Workbench sign in through the portal, so there is no password for the MCP server to use. It signs in with a personal API token instead, which acts as the user: it sees only the projects they are a member of, and the audit trail records their name.
+
+**Follow the step-by-step guide: [CHEMBIOCATALYST_MCP_SETUP.md](CHEMBIOCATALYST_MCP_SETUP.md).**
+
+How it is protected:
+- A token belongs to one user and can never do more than that user can. Project roles still apply, so analyses need editor access on the project.
+- The server keeps only a hash of each token. Revoking one on the API tokens page stops it at once.
+- Removing someone from SAR Workbench in the portal stops their tokens too. The server re-checks the portal while a token is in use, so it takes effect within five minutes (`SAR_TOKEN_PORTAL_RECHECK_SECONDS`).
+- A token cannot create tokens, and it works only for the `/api/` endpoints, not the web pages.
+- If the portal cannot be reached, token requests are refused rather than allowed.
+
+Operators enable this by running the app with `SAR_AUTH_MODE=portal`. Optional settings: `SAR_PUBLIC_URL` (the address shown on the API tokens page) and `SAR_SERVER_CERT_FILE` (a PEM *public* certificate offered for download; keys and other files are refused).
 
 ## Permission modes
 
@@ -95,6 +110,8 @@ The assistant can still read all of these records. Deleting or overwriting data 
 | --- | --- | --- |
 | `SAR_MCP_BASE_URL` | `http://127.0.0.1:5001` | Web app address (origin only) |
 | `SAR_MCP_MODE` | `analyze` | `read-only`, `analyze` or `full` |
+| `SAR_MCP_TOKEN` | none | API token for a portal-managed server (normally read from the private file) |
+| `SAR_MCP_CA_BUNDLE` | system store | Certificate file to trust, for servers with their own certificate |
 | `SAR_MCP_CREDENTIALS_FILE` | `~/.config/sar-workbench/mcp.env` | Private file with the login |
 | `SAR_MCP_PUBLIC_URL` | same as base URL | Address used in links, if your browser reaches the app differently |
 | `SAR_MCP_PROJECT_IDS` | all accessible | Comma-separated allowlist |
@@ -107,6 +124,9 @@ The assistant can still read all of these records. Deleting or overwriting data 
 
 - **"Cannot reach the SAR Workbench"**: start the app with `pixi run start-local`, or correct `SAR_MCP_BASE_URL`.
 - **"requires sign-in but no credentials"**: run `pixi run mcp-credentials`, then reconnect the server in Kiro.
+- **"rejected the API token"**: it has expired or been revoked. Create a new one on the API tokens page, then run `--save-token` again.
+- **"no longer has access"**: your portal access to SAR Workbench was removed. Ask a portal administrator.
+- **"CERTIFICATE_VERIFY_FAILED"**: set `SAR_MCP_CA_BUNDLE` to the platform certificate file (step 3 above).
 - **"can be read by other users"**: run `chmod 600 ~/.config/sar-workbench/mcp.env`.
 - **"Email or password was not accepted"**: rerun `pixi run mcp-credentials`. After three failures the server stops trying until it restarts.
 - **A tool is missing**: it is hidden by `SAR_MCP_MODE`. `sar_status` shows the active mode.

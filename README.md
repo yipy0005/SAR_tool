@@ -98,6 +98,8 @@ pixi run mcp-config         # print the Kiro mcp.json entry to merge
 
 Three permission modes (`SAR_MCP_MODE`): `read-only`, `analyze` (default, can store derived analysis runs) and `full` (can also create projects and import data). Approving recommendations, creating claims or series, and changing membership are never exposed. Tool results are sent to the model provider, so connect only projects you may share with it. See [`docs/MCP_GUIDE.md`](docs/MCP_GUIDE.md).
 
+**Using the shared ChemBioCatalyst server?** Follow [`docs/CHEMBIOCATALYST_MCP_SETUP.md`](docs/CHEMBIOCATALYST_MCP_SETUP.md) (clone the `chembiocatalyst` branch; about 10 minutes).
+
 ## Optional synthetic example-data setup
 
 For a Mac-only production-shaped smoke test, use the interactive Pixi command instead of the illustrative demo task:
