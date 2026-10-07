@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>API tokens · SAR Workbench</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <main class="page-content" style="max-width: 860px; margin: 6vh auto 0;">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="section-kicker">ACCOUNT</div>
+            <h1 style="font-size: 30px; margin-top: 8px;">API tokens</h1>
+          </div>
+          <a class="button button--secondary" href="{{ url_for('index') }}">Back to the workbench</a>
+        </div>
+        <p class="modal-copy">
+          A token lets an app on your computer, such as the SAR Workbench MCP server in Kiro, act as you.
+          It can see exactly the projects you can see, and its activity is recorded under your name.
+          Anyone who has the token can use it, so keep it private and revoke it if it leaks.
+          Tokens stop working if your portal access to SAR Workbench is removed.
+        </p>
+
+        {% if error %}<div class="evidence-boundary-box" role="alert"><span>{{ error }}</span></div>{% endif %}
+
+        {% if plaintext %}
+        <div class="evidence-boundary-box" role="status" aria-live="polite">
+          <span>
+            <strong>Copy your new token now. It is shown only once.</strong><br>
+            Name: {{ new_token.name }} · expires {{ new_token.expires_at }}<br>
+            <input id="newToken" type="text" readonly value="{{ plaintext }}" aria-label="New API token"
+                   style="width: calc(100% - 22px); min-height: 44px; padding: 10px; margin-top: 10px; font-family: monospace;">
+            <br>Next, on your computer, run <code>python3 sar_mcp_server.py --save-token</code> and paste it when asked.
+          </span>
+        </div>
+        {% endif %}
+
+        <h2 style="font-size: 20px; margin-top: 24px;">Connect Kiro (MCP)</h2>
+        <ol class="modal-copy" style="line-height: 1.7;">
+          <li>Get the code once: <code>git clone --branch chembiocatalyst https://github.com/yipy0005/SAR_tool.git</code></li>
+          {% if certificate_available %}
+          <li><a class="button button--secondary" href="{{ url_for('account_tokens_certificate') }}">Download the server certificate</a> and save it as <code>~/.config/sar-workbench/chembiocatalyst.crt</code>.</li>
+          {% endif %}
+          <li>Create a token below, then in the cloned folder run <code>python3 sar_mcp_server.py --save-token</code>.</li>
+          <li>Generate your Kiro entry with <code>python3 sar_mcp_server.py --print-kiro-config --base-url {{ base_url }}{% if certificate_available %} --ca-bundle ~/.config/sar-workbench/chembiocatalyst.crt{% endif %}</code> and merge it into <code>~/.kiro/settings/mcp.json</code>.</li>
+        </ol>
+        <p class="modal-copy">Full step-by-step guide: <a href="https://github.com/yipy0005/SAR_tool/blob/chembiocatalyst/docs/CHEMBIOCATALYST_MCP_SETUP.md" rel="noopener">CHEMBIOCATALYST_MCP_SETUP.md</a></p>
+
+        <h2 style="font-size: 20px; margin-top: 24px;">Create a token</h2>
+        <form method="post" action="{{ url_for('account_tokens_create') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <label class="form-label" for="name">Name</label>
+          <input id="name" name="name" type="text" maxlength="60" required placeholder="Kiro on my laptop"
+                 style="width: calc(100% - 42px); min-height: 44px; padding: 10px;">
+          <label class="form-label" for="lifetime_days">Lasts (days, 1 to {{ max_days }})</label>
+          <input id="lifetime_days" name="lifetime_days" type="number" min="1" max="{{ max_days }}" value="{{ default_days }}"
+                 style="width: 140px; min-height: 44px; padding: 10px;">
+          <div class="modal-actions" style="margin-top: 20px;">
+            <button class="button button--primary" type="submit">Create token</button>
+          </div>
+        </form>
+        <p class="modal-copy">You can have up to {{ max_active }} active tokens.</p>
+
+        <h2 style="font-size: 20px; margin-top: 24px;">Your tokens</h2>
+        {% if tokens %}
+        <div style="overflow-x: auto;">
+          <table class="mini-table" style="width: 100%;">
+            <thead>
+              <tr><th scope="col">Name</th><th scope="col">Starts with</th><th scope="col">Created</th><th scope="col">Expires</th><th scope="col">Last used</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
+            </thead>
+            <tbody>
+              {% for token in tokens %}
+              <tr>
+                <td>{{ token.name }}</td>
+                <td><code>{{ token.token_prefix }}…</code></td>
+                <td>{{ token.created_at }}</td>
+                <td>{{ token.expires_at }}</td>
+                <td>{{ token.last_used_at or 'never' }}</td>
+                <td>{{ token.status }}</td>
+                <td>
+                  {% if token.status == 'active' %}
+                  <form method="post" action="{{ url_for('account_tokens_revoke', token_id=token.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <button class="button button--secondary" type="submit" aria-label="Revoke token {{ token.name }}">Revoke</button>
+                  </form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="modal-copy">You have not created any tokens yet.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

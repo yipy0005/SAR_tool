@@ -12,6 +12,7 @@ MODES = ("read-only", "analyze", "full")
 DEFAULT_BASE_URL = "http://127.0.0.1:5001"
 DEFAULT_CREDENTIALS_FILE = "~/.config/sar-workbench/mcp.env"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+TOKEN_PREFIX = "sarpat_"
 
 
 class ConfigError(ValueError):
@@ -46,6 +47,10 @@ def read_credentials_file(path: Path) -> dict[str, str]:
             value = value[1:-1]
         values[key] = value
     return values
+
+
+def valid_token_format(value: str) -> bool:
+    return value.startswith(TOKEN_PREFIX) and 20 <= len(value) <= 200 and value.isascii() and not any(c.isspace() for c in value)
 
 
 def _origin(value: str, name: str):
@@ -83,6 +88,8 @@ class Settings:
     project_ids: frozenset = frozenset()
     log_level: str = "warning"
     public_url: str = ""
+    token: str = ""
+    ca_bundle: str = ""
 
     @property
     def link_origin(self) -> str:
@@ -96,6 +103,10 @@ class Settings:
     @property
     def has_credentials(self) -> bool:
         return bool(self.email and self.password)
+
+    @property
+    def has_token(self) -> bool:
+        return bool(self.token)
 
     def transport_problem(self) -> str | None:
         """Why requests must not be sent, or None. Patient data and passwords never cross plain HTTP off-host."""
@@ -120,11 +131,21 @@ class Settings:
             raise ConfigError(f"SAR_MCP_MODE must be one of: {', '.join(MODES)}.")
         email = (env.get("SAR_MCP_EMAIL") or "").strip().lower()
         password = env.get("SAR_MCP_PASSWORD") or ""
-        if not (email and password):
+        token = (env.get("SAR_MCP_TOKEN") or "").strip()
+        if not token and not (email and password):
             location = Path(env.get("SAR_MCP_CREDENTIALS_FILE") or DEFAULT_CREDENTIALS_FILE).expanduser()
             stored = read_credentials_file(location)
+            token = stored.get("SAR_MCP_TOKEN", "").strip()
             email = email or stored.get("SAR_MCP_EMAIL", "").strip().lower()
             password = password or stored.get("SAR_MCP_PASSWORD", "")
+        if token and not valid_token_format(token):
+            raise ConfigError(f"SAR_MCP_TOKEN does not look like a SAR Workbench API token (it starts with {TOKEN_PREFIX}).")
+        ca_bundle = ""
+        if (env.get("SAR_MCP_CA_BUNDLE") or "").strip():
+            bundle = Path(env["SAR_MCP_CA_BUNDLE"].strip()).expanduser()
+            if not bundle.is_file():
+                raise ConfigError(f"SAR_MCP_CA_BUNDLE points to {bundle}, which is not a file.")
+            ca_bundle = str(bundle)
         projects = frozenset(item.strip() for item in (env.get("SAR_MCP_PROJECT_IDS") or "").split(",") if item.strip())
         return cls(
             base_url=f"{parts.scheme}://{parts.netloc}",
@@ -137,4 +158,6 @@ class Settings:
             project_ids=projects,
             log_level=(env.get("SAR_MCP_LOG_LEVEL") or "warning").strip().lower(),
             public_url=public_url,
+            token=token,
+            ca_bundle=ca_bundle,
         )

@@ -29,6 +29,7 @@ from authorization import (
     ensure_local_user,
     has_project_access,
     list_project_members,
+    session_email,
 )
 from chemistry import (
     StructureValidationError,
@@ -40,6 +41,8 @@ from chemistry import (
     standardize_structure,
 )
 from pattern_explorer import build_pattern_explorer
+import api_tokens
+import portal_sso
 
 from config import Settings
 from display import endpoint_name, format_measure, format_number, format_unit, humanize, register_filters as register_display_filters, substituent_name
@@ -259,6 +262,9 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         LOG_SINK=settings.log_sink,
         LOG_LEVEL=settings.log_level,
         LOG_RETENTION_DAYS=settings.log_retention_days,
+        # Several apps share one host on different ports and browsers do not
+        # isolate cookies by port, so the default "session" name would collide.
+        SESSION_COOKIE_NAME=os.environ.get("SAR_SESSION_COOKIE_NAME", "sar_session"),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         TESTING=False,
@@ -294,13 +300,21 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
     def enforce_production_access():
         if app.config["SAR_ENV"] != "production":
             return None
-        public_paths = {"healthz", "readyz", "login"}
+        public_paths = {"healthz", "readyz", "login", "portal_sso_login"}
         if request.endpoint in public_paths or request.path.startswith("/static/"):
             return None
+        bearer = _bearer_token()
+        if bearer is not None and request.path.startswith("/api/") and _api_tokens_enabled():
+            # Non-interactive clients (the MCP server). Cookies are not involved, so there is no
+            # CSRF exposure and no session is created; the token's owner is the acting user.
+            return _authenticate_bearer(bearer)
         if not is_authenticated():
             if request.path.startswith("/api/"):
                 return jsonify(error="authentication_required", message="Sign in before accessing production data."), 401
             next_path = request.full_path if request.full_path.startswith("/") else "/"
+            next_path = next_path[:-1] if next_path.endswith("?") else next_path
+            if app.config["SAR_AUTH_MODE"] == "portal":
+                return redirect(portal_sso.portal_login_url(next_path))
             return redirect(url_for("login", next=next_path))
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             try:
@@ -311,9 +325,49 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
                 return "CSRF validation failed", 400
         return None
 
+    def _api_tokens_enabled() -> bool:
+        return app.config["SAR_ENV"] == "production" and app.config["SAR_AUTH_MODE"] == "portal"
+
+    def _bearer_token() -> str | None:
+        header = request.headers.get("Authorization", "")
+        scheme, _, value = header.partition(" ")
+        return value.strip() if scheme.lower() == "bearer" else None
+
+    def _token_error(status: int, code: str, message: str):
+        response = jsonify(error=code, message=message)
+        response.status_code = status
+        if status == 401:
+            response.headers["WWW-Authenticate"] = 'Bearer realm="sar-workbench"'
+        return response
+
+    def _authenticate_bearer(token: str):
+        email = None
+        try:
+            _ensure_database(app)
+            email = api_tokens.authenticate_token(app.config["DATABASE_PATH"], token)
+        except Exception:
+            app.logger.exception("api token lookup failed", extra={"request_id": g.get("request_id")})
+            return _token_error(503, "token_check_unavailable", "The token could not be checked. Try again shortly.")
+        if not email:
+            app.logger.warning("api token rejected", extra={"request_id": g.get("request_id")})
+            return _token_error(401, "invalid_token", "The API token is invalid, expired or revoked. Create a new one in the web app.")
+        try:
+            allowed = portal_sso.has_app_access_cached(email)
+        except portal_sso.PortalUnavailableError:
+            app.logger.exception("portal access check unavailable", extra={"request_id": g.get("request_id")})
+            return _token_error(503, "portal_unavailable", "The ChemBioCatalyst portal could not confirm access. Try again shortly.")
+        if not allowed:
+            return _token_error(403, "access_revoked", "This account no longer has access to SAR Workbench in the portal.")
+        g.token_user_email = email
+        g.auth_via_token = True
+        return None
+
     @app.context_processor
     def security_context():
-        return {"csrf_token": csrf_token() if app.config["SAR_ENV"] == "production" else ""}
+        return {
+            "csrf_token": csrf_token() if app.config["SAR_ENV"] == "production" else "",
+            "tokens_enabled": _api_tokens_enabled(),
+        }
 
     @app.context_processor
     def ketcher_context():
@@ -386,6 +440,9 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         next_path = request.args.get("next", "/")
         if not next_path.startswith("/") or next_path.startswith("//"):
             next_path = "/"
+        if app.config["SAR_AUTH_MODE"] == "portal":
+            # No local credentials in portal mode; the portal issues a token and returns here.
+            return redirect(portal_sso.portal_login_url(next_path))
         if request.method == "POST":
             try:
                 validate_csrf(request)
@@ -409,7 +466,46 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             except CSRFError:
                 return jsonify(error="csrf_failed", message="A valid CSRF token is required."), 400
         logout_session()
+        if app.config["SAR_ENV"] == "production" and app.config["SAR_AUTH_MODE"] == "portal":
+            return redirect(portal_sso.portal_logout_url())
         return redirect(url_for("login")) if app.config["SAR_ENV"] == "production" else jsonify(status="logged_out")
+
+    @app.get("/auth/sso-login", endpoint="portal_sso_login")
+    def portal_sso_login():
+        """Exchange a single-use ChemBioCatalyst portal token for a workbench session."""
+        if app.config["SAR_ENV"] != "production" or app.config["SAR_AUTH_MODE"] != "portal":
+            return jsonify(error="not_found", message="Portal sign-in is not enabled."), 404
+        next_path = portal_sso.safe_next_path(request.args.get("next"))
+        token = str(request.args.get("token", ""))
+        try:
+            email = portal_sso.validate_token(token)
+            allowed = bool(email) and portal_sso.has_app_access(email)
+        except portal_sso.PortalUnavailableError:
+            app.logger.exception("portal sso unavailable", extra={"request_id": g.get("request_id")})
+            return Response(
+                "The ChemBioCatalyst portal could not confirm your sign-in. Try again from the portal.",
+                status=503,
+                mimetype="text/plain",
+            )
+        if not email:
+            # Expired or reused token. Not auto-redirected, so a portal fault cannot loop.
+            return Response(
+                "Your sign-in link has expired or was already used. Open SAR Workbench again from the portal.",
+                status=401,
+                mimetype="text/plain",
+            )
+        if not allowed:
+            app.logger.warning("portal sso access denied", extra={"request_id": g.get("request_id")})
+            return Response(
+                "Your account does not have access to SAR Workbench. Ask a portal administrator to grant access.",
+                status=403,
+                mimetype="text/plain",
+            )
+        _ensure_database(app)
+        if not ensure_local_user(app.config["DATABASE_PATH"], email):
+            return Response("This SAR Workbench account is inactive.", status=403, mimetype="text/plain")
+        login_session(email)
+        return redirect(next_path)
 
     @app.get("/")
     def index():
@@ -502,6 +598,119 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             **context,
             page_view=view,
         )
+
+    @app.get("/api/v1/me")
+    def whoami():
+        """Who the request acts as. Lets API clients show which account a token belongs to."""
+        email = session_email()
+        return jsonify(email=email, auth="token" if g.get("auth_via_token") else "session")
+
+    def _token_page(*, new_token: dict[str, Any] | None = None, plaintext: str | None = None, error: str | None = None, status: int = 200):
+        user_id = current_user_id(app.config["DATABASE_PATH"])
+        tokens = api_tokens.list_tokens(app.config["DATABASE_PATH"], user_id) if user_id else []
+        page = render_template(
+            "account_tokens.html",
+            tokens=tokens,
+            new_token=new_token,
+            plaintext=plaintext,
+            error=error,
+            max_active=api_tokens.MAX_ACTIVE_TOKENS_PER_USER,
+            default_days=api_tokens.DEFAULT_LIFETIME_DAYS,
+            max_days=api_tokens.MAX_LIFETIME_DAYS,
+            base_url=(os.environ.get("SAR_PUBLIC_URL", "").strip().rstrip("/") or request.host_url.rstrip("/")),
+            certificate_available=_server_certificate_pem() is not None,
+        )
+        response = Response(page, status=status, mimetype="text/html")
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    def _server_certificate_pem() -> bytes | None:
+        """The server's public certificate for users to trust, or None when none is published.
+
+        Only a plain certificate is ever served. Anything that mentions a private key, is too large,
+        or is not a PEM certificate is refused, so a wrong path can never expose a key.
+        """
+        path = os.environ.get("SAR_SERVER_CERT_FILE", "").strip()
+        if not path:
+            return None
+        try:
+            data = Path(path).read_bytes()
+        except OSError:
+            return None
+        text = data.decode("ascii", errors="replace").strip()
+        if len(data) > 65536 or "PRIVATE KEY" in text or not (
+            text.startswith("-----BEGIN CERTIFICATE-----") and text.endswith("-----END CERTIFICATE-----")
+        ):
+            app.logger.error("SAR_SERVER_CERT_FILE is not a plain PEM certificate; not publishing it")
+            return None
+        return data
+
+    def _token_management_guard():
+        """Tokens are managed from a signed-in browser session only: a token can never mint tokens."""
+        if not _api_tokens_enabled():
+            return jsonify(error="not_found", message="API tokens are not enabled."), 404
+        if g.get("auth_via_token") or not is_authenticated():
+            return jsonify(error="sign_in_required", message="Manage API tokens from a signed-in browser session."), 403
+        _ensure_database(app)
+        if not current_user_id(app.config["DATABASE_PATH"]):
+            return jsonify(error="sign_in_required", message="Sign in again."), 403
+        return None
+
+    def _audit_token_event(operation: str, token_id: str, outcome: str = "success") -> None:
+        with transaction(app.config["DATABASE_PATH"]) as connection:
+            connection.execute(
+                """
+                INSERT INTO audit_events
+                    (id, actor_user_id, project_id, operation, resource_type, resource_id, request_id, outcome, created_at)
+                VALUES (?, ?, NULL, ?, 'api_token', ?, ?, ?, ?)
+                """,
+                (_id("audit"), current_user_id(app.config["DATABASE_PATH"]), operation, token_id, g.get("request_id"), outcome, _now()),
+            )
+
+    @app.get("/account/tokens", endpoint="account_tokens")
+    def account_tokens():
+        blocked = _token_management_guard()
+        return blocked if blocked is not None else _token_page()
+
+    @app.get("/account/tokens/certificate", endpoint="account_tokens_certificate")
+    def account_tokens_certificate():
+        blocked = _token_management_guard()
+        if blocked is not None:
+            return blocked
+        pem = _server_certificate_pem()
+        if pem is None:
+            return jsonify(error="not_found", message="No server certificate is published here."), 404
+        response = Response(pem, mimetype="application/x-pem-file")
+        response.headers["Content-Disposition"] = 'attachment; filename="chembiocatalyst.crt"'
+        return response
+
+    @app.post("/account/tokens", endpoint="account_tokens_create")
+    def account_tokens_create():
+        blocked = _token_management_guard()
+        if blocked is not None:
+            return blocked
+        try:
+            days_text = str(request.form.get("lifetime_days", "")).strip()
+            days = int(days_text) if days_text else None
+        except ValueError:
+            return _token_page(error="Enter the lifetime as a whole number of days.", status=422)
+        try:
+            record, plaintext = api_tokens.create_token(
+                app.config["DATABASE_PATH"], current_user_id(app.config["DATABASE_PATH"]), str(request.form.get("name", "")), days
+            )
+        except api_tokens.TokenError as exc:
+            return _token_page(error=str(exc), status=422)
+        _audit_token_event("api_token_create", record["id"])
+        return _token_page(new_token=record, plaintext=plaintext, status=201)
+
+    @app.post("/account/tokens/<token_id>/revoke", endpoint="account_tokens_revoke")
+    def account_tokens_revoke(token_id: str):
+        blocked = _token_management_guard()
+        if blocked is not None:
+            return blocked
+        if api_tokens.revoke_token(app.config["DATABASE_PATH"], current_user_id(app.config["DATABASE_PATH"]), token_id):
+            _audit_token_event("api_token_revoke", token_id)
+        return redirect(url_for("account_tokens"))
 
     @app.get("/healthz")
     def healthz():

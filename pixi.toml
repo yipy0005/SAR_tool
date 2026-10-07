@@ -2,7 +2,7 @@
 name = "sar-workbench"
 version = "0.1.0"
 channels = ["conda-forge"]
-platforms = ["osx-arm64"]
+platforms = ["osx-arm64", "linux-64"]
 
 [dependencies]
 python = "==3.12.14"
@@ -22,5 +22,6 @@ db-init = "python manage.py init-db"
 db-check = "python manage.py check-db"
 fetch-ketcher = "python scripts/fetch_ketcher.py"
 mcp-credentials = "python sar_mcp_server.py --save-credentials"
+mcp-token = "python sar_mcp_server.py --save-token"
 mcp-check = "python sar_mcp_server.py --check"
 mcp-config = "python sar_mcp_server.py --print-kiro-config"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import re
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -64,9 +65,11 @@ class SarClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._jar = http.cookiejar.CookieJar()
-        self._opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(self._jar), _SameOriginRedirects(settings.base_url)
-        )
+        handlers = [urllib.request.HTTPCookieProcessor(self._jar), _SameOriginRedirects(settings.base_url)]
+        if settings.ca_bundle:
+            # The ChemBioCatalyst servers use the platform's own certificate; trust exactly that file.
+            handlers.append(urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=settings.ca_bundle)))
+        self._opener = urllib.request.build_opener(*handlers)
         self._csrf = ""
         self._auth_required: bool | None = None
         self._signed_in = False
@@ -89,6 +92,8 @@ class SarClient:
         elif form is not None:
             data = urllib.parse.urlencode(form).encode("utf-8")
             headers["Content-Type"] = "application/x-www-form-urlencoded"
+        if self.settings.token:
+            headers["Authorization"] = f"Bearer {self.settings.token}"
         if method != "GET" and self._csrf:
             headers["X-CSRF-Token"] = self._csrf
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -151,7 +156,38 @@ class SarClient:
         self._signed_in = True
         self.user_email = self.settings.email
 
+    def _token_problem(self, status: int, payload: Any) -> str:
+        info = payload if isinstance(payload, dict) else {}
+        if info.get("error") == "invalid_token" or status == 401:
+            return (
+                "The SAR Workbench rejected the API token (invalid, expired or revoked). "
+                f"Create a new one at {self.settings.base_url}/account/tokens, then run `python3 sar_mcp_server.py --save-token`."
+            )
+        return str(info.get("message") or f"The SAR Workbench refused the API token (HTTP {status}).")
+
+    def _token_session(self) -> None:
+        """Confirm the token works and learn whose it is. Tokens need no sign-in form or CSRF handshake."""
+        status, kind, text = self._send("GET", "/api/v1/me")
+        payload: Any = None
+        if "json" in kind:
+            try:
+                payload = json.loads(text)
+            except ValueError:
+                payload = None
+        if status in (401, 403):
+            raise SarAuthError(self._token_problem(status, payload))
+        if status >= 400:
+            info = payload if isinstance(payload, dict) else {}
+            raise SarApiError(status, str(info.get("error") or "http_error"), str(info.get("message") or ""))
+        self.user_email = str((payload or {}).get("email") or "")
+        self._auth_required = True
+        self._signed_in = True
+
     def ensure_session(self) -> None:
+        if self.settings.token:
+            if not self._signed_in:
+                self._token_session()
+            return
         if self._auth_required is None:
             self._probe_auth()
         if self._auth_required and not self._signed_in:
@@ -170,6 +206,9 @@ class SarClient:
                     payload = json.loads(text)
                 except ValueError:
                     payload = None
+            if self.settings.token and status in (401, 403) and (payload or {}).get("error") in {"invalid_token", "access_revoked", "authentication_required"}:
+                self._signed_in = False
+                raise SarAuthError(self._token_problem(status, payload))
             expired = (status == 401 and (payload or {}).get("error") == "authentication_required") or (
                 status == 400 and (payload or {}).get("error") == "csrf_failed"
             )

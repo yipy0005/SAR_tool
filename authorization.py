@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from flask import session
+from flask import g, has_request_context, session
 
 from database import read_connection, transaction
 
@@ -27,6 +27,10 @@ def _id(prefix: str) -> str:
 
 
 def session_email() -> str | None:
+    """The signed-in user: the API-token owner for a bearer-authenticated request, else the session user."""
+    token_email = g.get("token_user_email") if has_request_context() else None
+    if token_email:
+        return str(token_email).strip().lower() or None
     email = str(session.get("user_email", "")).strip().lower()
     return email or None
 

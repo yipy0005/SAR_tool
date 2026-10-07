@@ -72,12 +72,17 @@ class Settings:
             errors.append("SAR_SECRET_KEY must be at least 32 characters in production")
         if self.auth_mode == "disabled":
             errors.append("SAR_AUTH_MODE must enable an external or local identity boundary")
-        if self.auth_mode != "local":
-            errors.append("The first production release supports SAR_AUTH_MODE=local only")
-        if not os.environ.get("SAR_AUTH_EMAIL"):
-            errors.append("SAR_AUTH_EMAIL must be configured for local production authentication")
-        if not os.environ.get("SAR_AUTH_PASSWORD_HASH"):
-            errors.append("SAR_AUTH_PASSWORD_HASH must be configured for local production authentication")
+        if self.auth_mode not in {"local", "portal"}:
+            errors.append("Production supports SAR_AUTH_MODE=local or SAR_AUTH_MODE=portal only")
+        if self.auth_mode == "local":
+            if not os.environ.get("SAR_AUTH_EMAIL"):
+                errors.append("SAR_AUTH_EMAIL must be configured for local production authentication")
+            if not os.environ.get("SAR_AUTH_PASSWORD_HASH"):
+                errors.append("SAR_AUTH_PASSWORD_HASH must be configured for local production authentication")
+        if self.auth_mode == "portal":
+            portal = os.environ.get("PORTAL_URL", "").strip()
+            if not portal.startswith(("https://", "http://")):
+                errors.append("PORTAL_URL must be an http(s) URL for portal SSO authentication")
         if self.max_upload_bytes <= 0:
             errors.append("SAR_MAX_UPLOAD_BYTES must be positive")
         if self.log_sink != "stdout" and not Path(self.log_sink).expanduser().is_absolute():
