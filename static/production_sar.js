@@ -39,13 +39,48 @@
   const formatValue = (value, unit, qualifier = "") => F.measure(value, unit, qualifier);
   const formatDelta = (value, unit) => F.delta(value, unit);
 
+  const selectedMode = () => form.querySelector('input[name="mode"]:checked')?.value || "discover";
+
   const setStatus = (message, kind = "") => {
     if (!status) return;
     status.textContent = message;
     status.dataset.status = kind;
   };
 
-  const selectedMode = () => form.querySelector('input[name="mode"]:checked')?.value || "discover";
+  const urlState = new URLSearchParams(window.location.search);
+  const requestedSarMode = urlState.get("sar_mode") || "";
+  const requestedEndpoint = urlState.get("endpoint_key") || "";
+  const requestedRelationship = urlState.get("relationship_id") || "";
+  const requestedComparisonRun = urlState.get("comparison_run_id") || "";
+  const validUrlMode = ["discover", "selected", "prodrug"].includes(requestedSarMode) ? requestedSarMode : "";
+  const serverStateKind = form.dataset.sarStateKind || "";
+  const serverStateId = form.dataset.sarStateId || "";
+  const serverStateError = form.dataset.sarStateError || "";
+  const serverEndpointError = form.dataset.sarEndpointError || "";
+  const endpointOptionValues = new Set([...(endpoint?.options || [])].map((option) => option.value));
+  const invalidEndpointState = Boolean(serverEndpointError || (requestedEndpoint && !endpointOptionValues.has(requestedEndpoint)));
+  if (validUrlMode) {
+    const input = form.querySelector(`input[name="mode"][value="${CSS.escape(validUrlMode)}"]`);
+    if (input) input.checked = true;
+  }
+  if (!invalidEndpointState && requestedEndpoint) endpoint.value = requestedEndpoint;
+  if (invalidEndpointState) {
+    form.dataset.requestedProjectState = "not-found:endpoint";
+    if (runButton) runButton.disabled = true;
+    setStatus(serverEndpointError || "The requested SAR endpoint is not available in this project.", "error");
+  }
+  if (requestedSarMode && !validUrlMode) setStatus("The requested SAR mode is not available in this project.", "error");
+  if (serverStateError) setStatus(serverStateError, "error");
+  if (serverStateKind && serverStateId) {
+    form.dataset.requestedProjectState = `${serverStateKind}:${serverStateId}`;
+    const prodrugInput = form.querySelector('input[name="mode"][value="prodrug"]');
+    if (prodrugInput) prodrugInput.checked = true;
+  } else if (requestedComparisonRun || requestedRelationship) {
+    // The server has already validated project scope; an absent marker is a safe empty state.
+    form.dataset.requestedProjectState = "not-found";
+    setStatus("The requested SAR state is not available in this project.", "error");
+  }
+
 
   const syncMode = () => {
     const mode = selectedMode();
@@ -200,7 +235,7 @@
         savedRelationships = Array.isArray(saved.relationships) ? saved.relationships : [];
         if (pairCount) pairCount.textContent = `${savedRelationships.length} saved pair${savedRelationships.length === 1 ? "" : "s"}`;
         if (pairSaved) pairSaved.textContent = "Mapping saved with review status: needs review.";
-        const comparison = await apiJson("/api/v1/analysis/prodrug-comparison", { project_id: projectId, endpoint_key: endpoint?.value || "" });
+        const comparison = await apiJson("/api/v1/analysis/prodrug-comparison", { project_id: projectId, endpoint_key: endpoint?.value || "", persist: false });
         renderProdrugComparison(comparison);
         setStatus(`Compared ${comparison.pair_count || 0} linked prodrug–active pairs.`, "success");
       } catch (error) {
@@ -251,6 +286,30 @@
     }
   };
 
+  const restoreRequestedState = async () => {
+    if (!serverStateKind || !serverStateId || invalidEndpointState) return;
+    try {
+      let comparison;
+      if (serverStateKind === "comparison_run_id") {
+        comparison = await apiJson(`/api/v1/analysis/prodrug-comparison/${encodeURIComponent(serverStateId)}?project_id=${encodeURIComponent(projectId)}&offset=0&limit=500`);
+        if (!comparison.endpoint_key || !endpointOptionValues.has(comparison.endpoint_key)) throw new Error("The saved comparison endpoint is not available in this project.");
+        endpoint.value = comparison.endpoint_key;
+      } else if (serverStateKind === "relationship_id") {
+        await loadSavedRelationships();
+        if (!savedRelationships.some((item) => item.id === serverStateId)) throw new Error("The saved relationship is not available in this project.");
+        if (!endpoint?.value) throw new Error("Choose an endpoint before restoring the saved relationship.");
+        comparison = await apiJson("/api/v1/analysis/prodrug-comparison", { project_id: projectId, endpoint_key: endpoint.value, relationship_ids: [serverStateId], persist: false });
+      } else {
+        throw new Error("The requested SAR state is not recognized.");
+      }
+      renderProdrugComparison(comparison);
+      setStatus("Restored the requested project-scoped prodrug comparison.", "success");
+    } catch (error) {
+      form.dataset.requestedProjectState = "not-found";
+      setStatus("The requested SAR state is not available in this project.", "error");
+    }
+  };
+
   const runProdrugAnalysis = async (endpointKey) => {
     const text = pairText?.value.trim() || "";
     if (text) {
@@ -266,7 +325,7 @@
       setStatus("Paste or upload a prodrug–active pair list before comparing.", "error");
       return;
     }
-    const comparison = await apiJson("/api/v1/analysis/prodrug-comparison", { project_id: projectId, endpoint_key: endpointKey });
+    const comparison = await apiJson("/api/v1/analysis/prodrug-comparison", { project_id: projectId, endpoint_key: endpointKey, persist: false });
     renderProdrugComparison(comparison);
   };
 
@@ -331,6 +390,7 @@
 
   form.querySelectorAll('input[name="mode"]').forEach((input) => input.addEventListener("change", syncMode));
   syncMode();
+  restoreRequestedState();
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();

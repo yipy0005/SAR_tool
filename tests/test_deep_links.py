@@ -118,8 +118,40 @@ def test_run_notice_text_is_escaped(app):
     assert "<script>alert(1)" not in html and "Run not found" in html
 
 
-def test_find_parameter_is_wired_into_the_search_dialog():
+def test_staged_and_exact_evidence_links_open_project_scoped_context(app):
+    client = app.test_client()
+    project = client.post("/api/v1/projects", json={"name": "Evidence links"}).get_json()["project"]["id"]
+    staged = client.post("/api/v1/imports/preview", json={"project_id": project, "filename": "evidence.csv", "csv_text": CSV}).get_json()
+    staged_html = client.get(f"/workspace/evidence?project_id={project}&stage=import_review&import_id={staged['import_id']}").get_data(as_text=True)
+    assert 'id="stagedImportContext"' in staged_html
+    assert f'data-import-id="{staged["import_id"]}"' in staged_html
+    assert 'data-state="ready"' in staged_html and "STAGED IMPORT REVIEW" in staged_html
+
+    assert client.post(f"/api/v1/imports/{staged['import_id']}/commit", json={"project_id": project}).status_code == 200
+    assert client.post("/api/v1/measurement-summaries/project", json={"project_id": project}).status_code == 201
+    measurements = client.get(f"/api/v1/measurements?project_id={project}").get_json()["results"]
+    summaries = client.get(f"/api/v1/measurement-summaries?project_id={project}").get_json()["summaries"]
+    evidence_html = client.get(
+        f"/workspace/evidence?project_id={project}&compound_id={measurements[0]['compound_id']}&measurement_id={measurements[0]['id']}&summary_id={summaries[0]['id']}"
+    ).get_data(as_text=True)
+    assert 'id="evidenceContext"' in evidence_html and 'data-state="ready"' in evidence_html
+
+    other = client.post("/api/v1/projects", json={"name": "Other evidence"}).get_json()["project"]["id"]
+    foreign_html = client.get(f"/workspace/evidence?project_id={other}&stage=import_review&import_id={staged['import_id']}").get_data(as_text=True)
+    assert 'id="stagedImportContext"' in foreign_html and 'data-state="not-found"' in foreign_html
+    assert "evidence.csv" not in foreign_html
+
+    client = app.test_client()
+    project = make_project(client)
+    html = client.get(f"/workspace/sar?project_id={project}&sar_mode=prodrug&endpoint_key=Foreign:import-v1").get_data(as_text=True)
+    assert 'id="productionSarEndpointError"' in html
+    assert 'data-state="not-found"' in html
+    assert "requested SAR endpoint" in html
+
     source = (Path(__file__).parents[1] / "static" / "structure_search.js").read_text(encoding="utf-8")
     for marker in ('get("find")', 'get("find_format")', "DOMContentLoaded", "runLinkedSearch", "slice(0, 500)"):
         assert marker in source
     assert '["auto", "smiles", "smarts"].includes(format)' in source  # an unknown format cannot reach the server
+    static_source = (Path(__file__).parents[1] / "static" / "production_sar.js").read_text(encoding="utf-8")
+    for marker in ("restoreRequestedState", "comparison_run_id", "relationship_id", "not-found", "const selectedMode =", "form.addEventListener(\"submit\""):
+        assert marker in static_source
