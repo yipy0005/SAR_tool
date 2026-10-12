@@ -1,6 +1,7 @@
 """Settings for the MCP server: environment variables plus an optional credentials file."""
 from __future__ import annotations
 
+import json
 import os
 import stat
 from dataclasses import dataclass
@@ -10,6 +11,11 @@ from urllib.parse import urlsplit
 
 MODES = ("read-only", "analyze", "full")
 DEFAULT_BASE_URL = "http://127.0.0.1:5001"
+DEFAULT_MAX_UPLOAD_BYTES = 5_000_000
+JSON_ENVELOPE_BYTES = 65_536
+
+def json_wire_limit(decoded_bytes: int) -> int:
+    return 4 * ((int(decoded_bytes) + 2) // 3) + JSON_ENVELOPE_BYTES
 DEFAULT_CREDENTIALS_FILE = "~/.config/sar-workbench/mcp.env"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
@@ -33,17 +39,32 @@ def read_credentials_file(path: Path) -> dict[str, str]:
     if hasattr(os, "getuid") and info.st_uid != os.getuid():
         raise ConfigError(f"{path} is owned by another user; refusing to read credentials from it.")
     values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in path.read_text(encoding="utf-8").splitlines(keepends=True):
+        line = raw_line.rstrip("\r\n")
         text = line.strip()
-        if not text or text.startswith("#") or "=" not in text:
+        if not text or text.startswith("#"):
             continue
+        if "=" not in text:
+            raise ConfigError("credential file contains a malformed line")
         key, _, value = text.partition("=")
         key = key.strip()
         if key.startswith("export "):
             key = key[len("export "):].strip()
         value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
+        if any(character in value for character in "\r\n"):
+            raise ConfigError("credential values may not contain line breaks")
+        if value[:1] in {"'", '"'}:
+            if len(value) < 2 or value[-1] != value[0]:
+                raise ConfigError("credential file contains malformed quoted values")
+            if value[0] == '"':
+                try:
+                    value = json.loads(value)
+                except (TypeError, ValueError) as exc:
+                    raise ConfigError("credential file contains malformed quoted values") from exc
+            else:
+                value = value[1:-1].replace("\\'", "'").replace("\\\\", "\\")
+            if not isinstance(value, str) or any(character in value for character in "\r\n"):
+                raise ConfigError("credential values may not contain line breaks")
         values[key] = value
     return values
 
@@ -83,6 +104,8 @@ class Settings:
     project_ids: frozenset = frozenset()
     log_level: str = "warning"
     public_url: str = ""
+    max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+    json_request_bytes: int = 0
 
     @property
     def link_origin(self) -> str:
@@ -126,6 +149,8 @@ class Settings:
             email = email or stored.get("SAR_MCP_EMAIL", "").strip().lower()
             password = password or stored.get("SAR_MCP_PASSWORD", "")
         projects = frozenset(item.strip() for item in (env.get("SAR_MCP_PROJECT_IDS") or "").split(",") if item.strip())
+        max_upload = int(env.get("SAR_MAX_UPLOAD_BYTES") or DEFAULT_MAX_UPLOAD_BYTES)
+        wire_limit = int(env.get("SAR_MAX_JSON_REQUEST_BYTES") or json_wire_limit(max_upload))
         return cls(
             base_url=f"{parts.scheme}://{parts.netloc}",
             mode=mode,
@@ -137,4 +162,6 @@ class Settings:
             project_ids=projects,
             log_level=(env.get("SAR_MCP_LOG_LEVEL") or "warning").strip().lower(),
             public_url=public_url,
+            max_upload_bytes=max_upload,
+            json_request_bytes=wire_limit,
         )

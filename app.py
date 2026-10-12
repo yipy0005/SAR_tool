@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import time
 import uuid
 from datetime import datetime, timezone
@@ -45,6 +46,7 @@ from config import Settings
 from display import endpoint_name, format_measure, format_number, format_unit, humanize, register_filters as register_display_filters, substituent_name
 from database import apply_migrations, database_ready, read_connection, transaction
 from export_engine import ExportError, MAX_EXPORT_ROWS, build_project_export, export_project_csv
+from endpoint_comparison_engine import compare_rows
 from measurement_engine import (
     MeasurementEngineError,
     create_measurement_summary,
@@ -74,16 +76,19 @@ from recommendation_engine import (
     review_generated_recommendation,
 )
 from observability import configure_logging, initialize_metrics, metrics_snapshot, record_request
-from rgroup_engine import RGroupAnalysisError, run_activity_cliff_analysis, run_rgroup_analysis
+from rgroup_engine import RGroupAnalysisError, get_activity_cliff_run, get_rgroup_run, run_activity_cliff_analysis, run_rgroup_analysis
 from selectivity_engine import SelectivityAnalysisError, get_selectivity_run, run_selectivity_analysis
 from series_engine import SeriesError, SeriesNotFoundError, create_series, create_series_version, series_context
 from prodrug_engine import (
+    MAX_PAIR_ROWS,
     ProdrugRelationshipError,
     compare_relationships,
     list_relationships,
     preview_relationships,
     save_relationships,
 )
+from prodrug_compare_persistence import persist_comparison
+from endpoint_comparison_engine import compare_rows
 from collections import defaultdict
 
 from sar_discovery import (
@@ -102,6 +107,7 @@ from substructure_search import (
     search_project as search_substructure,
     sketch_from_smiles,
 )
+from import_formats import decode_base64_upload
 from import_pipeline import (
     DuplicateImportError,
     ImportConflictError,
@@ -171,7 +177,8 @@ def _settings_from_config(config: dict[str, Any]) -> Settings:
         upload_dir=config["UPLOAD_DIR"],
         secret_key=config["SECRET_KEY"],
         auth_mode=config["SAR_AUTH_MODE"],
-        max_upload_bytes=config["MAX_CONTENT_LENGTH"],
+        max_upload_bytes=config["MAX_UPLOAD_BYTES"],
+        max_json_request_bytes=config["MAX_CONTENT_LENGTH"],
         host=config["HOST"],
         port=config["PORT"],
         secure_cookies=config["SESSION_COOKIE_SECURE"],
@@ -207,6 +214,38 @@ def _boolean_value(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _request_upload(payload: dict[str, Any], upload: Any, max_bytes: int) -> tuple[bytes, str, str]:
+    if upload:
+        content = upload.read(max_bytes + 1)
+        if len(content) > max_bytes:
+            raise UploadFormatError(f"Upload exceeds the {max_bytes} byte limit")
+        return content, Path(upload.filename or "upload.csv").name[:255], upload.mimetype or "text/csv"
+    if payload.get("csv_text") is not None and payload.get("content_base64") is not None:
+        raise UploadFormatError("Provide exactly one of csv_text or content_base64")
+    if isinstance(payload.get("content_base64"), str):
+        content = decode_base64_upload(payload["content_base64"], max_bytes=max_bytes)
+        filename = Path(str(payload.get("filename", "upload.xlsx"))).name[:255]
+        content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if filename.lower().endswith(".xlsx") else "text/csv"
+        return content, filename, content_type
+    csv_text = payload.get("csv_text")
+    if not isinstance(csv_text, str) or not csv_text:
+        raise UploadFormatError("Provide a multipart file, csv_text, or content_base64")
+    content = csv_text.encode("utf-8")
+    if len(content) > max_bytes:
+        raise UploadFormatError(f"Upload exceeds the {max_bytes} byte limit")
+    return content, Path(str(payload.get("filename", "upload.csv"))).name[:255], "text/csv"
+
+
+def _stable_import_order(source_row_id: str, row_id: str = "") -> tuple[int, str, str]:
+    text = str(source_row_id or "")
+    prefix = text.split(":", 1)[0]
+    try:
+        number = int(prefix)
+    except ValueError:
+        number = 2**31 - 1
+    return number, text, str(row_id or "")
 
 
 CONTENT_SECURITY_POLICY = (
@@ -251,7 +290,8 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         SAR_AUTH_MODE=settings.auth_mode,
         DATABASE_PATH=settings.database_path,
         UPLOAD_DIR=settings.upload_dir,
-        MAX_CONTENT_LENGTH=settings.max_upload_bytes,
+        MAX_UPLOAD_BYTES=settings.max_upload_bytes,
+        MAX_CONTENT_LENGTH=settings.max_json_request_bytes,
         MAX_EXPORT_ROWS=MAX_EXPORT_ROWS,
         HOST=settings.host,
         PORT=settings.port,
@@ -269,6 +309,10 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
     app.json.sort_keys = False
     configure_logging(app)
     initialize_metrics(app)
+    # Preview pagination is intentionally ephemeral: opaque tokens reference the
+    # in-process mapping without placing pair text or structured pairs in MCP
+    # continuation arguments, URLs, logs, or durable project data.
+    app.extensions["prodrug_preview_tokens"] = {}
 
     active_settings = _settings_from_config(app.config)
     if app.config["SAR_ENV"] == "production" and not app.config.get("TESTING"):
@@ -493,6 +537,50 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
                 g.pinned_run = {"id": run_notice["id"], "project_id": project["id"], "analysis_type": run_notice["analysis_type"]}
             run_notice["clear_url"] = url_for("production_workspace", view=view, project_id=project["id"])
         context = _production_page_context(app, project)
+        if view == "evidence" and project is not None:
+            import_id = request.args.get("import_id", "").strip()
+            context["staged_import_context"] = (
+                _production_staged_import_context(app, project["id"], import_id)
+                if import_id and request.args.get("stage", "") == "import_review"
+                else {"state": "empty"}
+            )
+            context["evidence_context"] = _production_evidence_context(
+                app,
+                project["id"],
+                compound_id=request.args.get("compound_id", "").strip(),
+                measurement_id=request.args.get("measurement_id", "").strip(),
+                summary_id=request.args.get("summary_id", "").strip(),
+            )
+        if view == "sar" and project is not None:
+            requested_endpoint = request.args.get("endpoint_key", "").strip()
+            endpoint_keys = {str(item.get("compatibility_key")) for item in context.get("sar_endpoints", [])}
+            endpoint_error = ""
+            if requested_endpoint and requested_endpoint not in endpoint_keys:
+                endpoint_error = "The requested SAR endpoint is not available in this project."
+            relationship_id = request.args.get("relationship_id", "").strip()
+            comparison_run_id = request.args.get("comparison_run_id", "").strip()
+            state_error = endpoint_error
+            state_kind = ""
+            state_id = ""
+            if comparison_run_id:
+                with read_connection(app.config["DATABASE_PATH"]) as connection:
+                    found = connection.execute("SELECT id FROM analysis_runs WHERE id = ? AND project_id = ? AND analysis_type = 'prodrug_comparison'", (comparison_run_id, project["id"])).fetchone()
+                if found is None:
+                    state_error = state_error or "The requested comparison is not available in this project."
+                else:
+                    state_kind, state_id = "comparison_run_id", comparison_run_id
+            elif relationship_id:
+                with read_connection(app.config["DATABASE_PATH"]) as connection:
+                    found = connection.execute("SELECT id FROM compound_relationships WHERE id = ? AND project_id = ?", (relationship_id, project["id"])).fetchone()
+                if found is None:
+                    state_error = state_error or "The requested relationship is not available in this project."
+                else:
+                    state_kind, state_id = "relationship_id", relationship_id
+            context["sar_endpoint_error"] = endpoint_error
+            context["sar_requested_endpoint"] = requested_endpoint
+            context["sar_state_error"] = state_error
+            context["sar_state_kind"] = state_kind
+            context["sar_state_id"] = state_id
         context["run_notice"] = run_notice
         if view == "analysis" and project is not None and context.get("counts", {}).get("analysis_runs"):
             # Built only here: the fingerprint pairs are not needed on other pages.
@@ -884,23 +972,19 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         _ensure_database(app)
         upload = request.files.get("file")
         payload = _json_payload()
-        if upload:
-            content = upload.read()
-            filename = Path(upload.filename or "upload.csv").name[:255]
-        else:
-            csv_text = payload.get("csv_text")
-            if not isinstance(csv_text, str):
-                return jsonify(error="file_required", message="Provide a multipart file or csv_text for profiling."), 400
-            content = csv_text.encode("utf-8")
-            filename = Path(str(payload.get("filename", "upload.csv"))).name[:255]
+        requested_project = str(payload.get("project_id") or "").strip()
+        # JSON profile requests are the MCP contract and must establish project
+        # scope before any upload bytes are decoded or profiled. Multipart
+        # browser uploads retain their existing unscoped profile behavior.
+        if upload is None and not requested_project:
+            return jsonify(error="project_required", message="Provide a valid project_id."), 422
+        if requested_project and (_get_project(app, requested_project) is None or not _project_access(app, requested_project, "editor")):
+            return jsonify(error="project_forbidden", message="Editor access is required for this project."), 403
         try:
-            profile = profile_upload(
-                content,
-                filename,
-                max_bytes=app.config["MAX_CONTENT_LENGTH"],
-            )
+            content, filename, _content_type = _request_upload(payload, upload, app.config["MAX_UPLOAD_BYTES"])
+            profile = profile_upload(content, filename, max_bytes=app.config["MAX_UPLOAD_BYTES"])
         except UploadFormatError as exc:
-            return jsonify(error="invalid_upload_format", message=str(exc)), 422
+            return jsonify(error="invalid_upload_format", message=str(exc)), 413 if "exceeds" in str(exc).lower() else 422
         return jsonify(profile=profile, data_origin="quarantined_import"), 200
 
     @app.post("/api/v1/imports/preview")
@@ -908,17 +992,11 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         _ensure_database(app)
         upload = request.files.get("file")
         payload = _json_payload()
-        if upload:
-            content = upload.read()
-            filename = Path(upload.filename or "upload.csv").name[:255]
-            content_type = upload.mimetype or "text/csv"
-        else:
-            csv_text = payload.get("csv_text")
-            if not isinstance(csv_text, str):
-                return jsonify(error="file_required", message="Provide a multipart file or csv_text for preview."), 400
-            content = csv_text.encode("utf-8")
-            filename = Path(str(payload.get("filename", "upload.csv"))).name[:255]
-            content_type = "text/csv"
+        try:
+            content, filename, content_type = _request_upload(payload, upload, app.config["MAX_UPLOAD_BYTES"])
+        except UploadFormatError as exc:
+            code = "upload_too_large" if "exceeds" in str(exc).lower() else "invalid_upload"
+            return jsonify(error=code, message=str(exc)), 413 if code == "upload_too_large" else 422
         raw_project_id = request.form.get("project_id") if upload else payload.get("project_id")
         project_id = str(raw_project_id).strip() if raw_project_id else None
         if project_id:
@@ -942,6 +1020,13 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         except ValueError as exc:
             return jsonify(error="invalid_mapping_override", message=str(exc)), 422
         formula_acknowledged = _boolean_value(raw_formula_acknowledged)
+        raw_offset = request.form.get("offset") if upload else payload.get("offset", 0)
+        raw_limit = request.form.get("limit") if upload else payload.get("limit", 500)
+        try:
+            offset = max(0, int(raw_offset or 0))
+            limit = min(500, max(1, int(raw_limit or 500)))
+        except (TypeError, ValueError):
+            return jsonify(error="invalid_pagination", message="offset and limit must be bounded integers."), 422
         try:
             preview = create_preview(
                 app.config["DATABASE_PATH"],
@@ -949,12 +1034,14 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
                 content,
                 filename,
                 content_type,
-                app.config["MAX_CONTENT_LENGTH"],
+                app.config["MAX_UPLOAD_BYTES"],
                 sheet_name=sheet_name,
                 header_row=header_row,
                 data_start_row=data_start_row,
                 mapping_overrides=mapping_overrides,
                 formula_acknowledged=formula_acknowledged,
+                offset=offset,
+                limit=limit,
                 actor_user_id=current_user_id(app.config["DATABASE_PATH"]) if app.config["SAR_ENV"] == "production" else None,
                 project_id=project_id,
             )
@@ -1054,6 +1141,40 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             return jsonify(error="sar_discovery_invalid", message=str(exc)), 422
         return jsonify(result), 201
 
+    @app.get("/api/v1/endpoint-comparison")
+    def endpoint_comparison_api():
+        _ensure_database(app)
+        project_id = str(request.args.get("project_id") or "").strip()
+        endpoint_a = str(request.args.get("endpoint_a") or "").strip()
+        endpoint_b = str(request.args.get("endpoint_b") or "none").strip() or "none"
+        coverage = str(request.args.get("coverage") or "all").strip()
+        q = str(request.args.get("q") or "")
+        if endpoint_b.lower() == "none": endpoint_b = "none"
+        if not endpoint_a or coverage not in {"all", "endpoint-a", "both", "review"}:
+            return jsonify(error="invalid_endpoint_selection", message="endpoint_a and a supported coverage are required."), 422
+        if coverage == "both" and endpoint_b == "none":
+            return jsonify(error="invalid_endpoint_selection", message="coverage=both requires endpoint_b."), 422
+        if endpoint_b != "none" and endpoint_a.casefold() == endpoint_b.casefold():
+            return jsonify(error="invalid_endpoint_selection", message="endpoint_a and endpoint_b must differ."), 422
+        project = _get_project(app, project_id)
+        if project is None or not _project_access(app, project_id, "viewer"):
+            return jsonify(error="project_forbidden", message="Viewer access is required for endpoint comparison."), 403
+        try:
+            offset = max(0, int(request.args.get("offset", 0))); limit = min(200, max(1, int(request.args.get("limit", 200))))
+        except (TypeError, ValueError):
+            return jsonify(error="invalid_pagination", message="offset and limit must be bounded integers."), 422
+        with read_connection(app.config["DATABASE_PATH"]) as connection:
+            compounds = [_row_dict(row) for row in connection.execute("SELECT id, registration_id FROM compounds WHERE project_id = ?", (project_id,))]
+            summaries = [_row_dict(row) for row in connection.execute("SELECT ms.*, c.registration_id FROM measurement_summaries ms JOIN compounds c ON c.id = ms.compound_id WHERE c.project_id = ?", (project_id,))]
+        for summary in summaries:
+            summary["source_measurement_ids"] = json.loads(summary.pop("source_measurement_ids_json", "[]") or "[]")
+            summary["missing_reasons"] = json.loads(summary.pop("missing_reasons_json", "[]") or "[]")
+        known_endpoints = {str(summary.get("compatibility_key")) for summary in summaries if summary.get("compatibility_key")}
+        requested_endpoints = [endpoint_a] + ([] if endpoint_b == "none" else [endpoint_b])
+        if any(endpoint not in known_endpoints for endpoint in requested_endpoints):
+            return jsonify(error="invalid_endpoint", message="The requested endpoint is not available in this project."), 422
+        return jsonify(compare_rows(summaries, compounds, endpoint_a, None if endpoint_b == "none" else endpoint_b, coverage, q, offset, limit))
+
     @app.get("/api/v1/compound-relationships")
     def list_compound_relationships_api():
         _ensure_database(app)
@@ -1061,10 +1182,8 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         project = _get_project(app, project_id)
         if project is None or not _project_access(app, project_id, "viewer"):
             return jsonify(error="project_forbidden", message="Viewer access is required for compound relationships."), 403
-        return jsonify(
-            relationships=list_relationships(app.config["DATABASE_PATH"], project_id),
-            data_origin="imported",
-        )
+        return jsonify(relationships=list_relationships(app.config["DATABASE_PATH"], project_id), data_origin="imported")
+
 
     @app.post("/api/v1/compound-relationships/preview")
     def preview_compound_relationships_api():
@@ -1074,17 +1193,99 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         project = _get_project(app, project_id)
         if project is None or not _project_access(app, project_id, "editor"):
             return jsonify(error="project_forbidden", message="Editor access is required to review compound relationships."), 403
+        supplied_mapping = [key for key in ("pairs", "pair_text") if payload.get(key) is not None]
+        continuation_token = str(payload.get("continuation_token") or "").strip()
+        if continuation_token and supplied_mapping:
+            return jsonify(error="invalid_relationship_mapping", message="Use continuation_token without resubmitting the mapping."), 422
+        if continuation_token:
+            token_state = app.extensions["prodrug_preview_tokens"].get(continuation_token)
+            if not token_state or token_state.get("project_id") != project_id:
+                return jsonify(error="invalid_continuation", message="The preview continuation is no longer available."), 422
+            mapping_payload = token_state
+            supplied_mapping = [key for key in ("pairs", "pair_text") if mapping_payload.get(key) is not None]
+        else:
+            mapping_payload = payload
+        if len(supplied_mapping) != 1:
+            return jsonify(error="invalid_relationship_mapping", message="Provide exactly one of pairs or pair_text."), 422
         try:
             preview = preview_relationships(
                 app.config["DATABASE_PATH"],
                 project_id,
-                pair_text=payload.get("pair_text"),
-                pairs=payload.get("pairs"),
-                relationship_type=str(payload.get("relationship_type") or "prodrug_of"),
+                pair_text=mapping_payload.get("pair_text"),
+                pairs=mapping_payload.get("pairs"),
+                relationship_type=str(mapping_payload.get("relationship_type") or "prodrug_of"),
+                offset=max(0, int(payload.get("offset", 0))),
+                limit=min(500, max(1, int(payload.get("limit", 500)))),
             )
+        except (TypeError, ValueError):
+            return jsonify(error="invalid_pagination", message="offset and limit must be bounded integers."), 422
         except ProdrugRelationshipError as exc:
             return jsonify(error="invalid_relationship_mapping", message=str(exc), details=exc.details), 422
+        if preview.get("has_more"):
+            if not continuation_token:
+                continuation_token = uuid.uuid4().hex
+                tokens = app.extensions["prodrug_preview_tokens"]
+                if len(tokens) >= 128:
+                    tokens.pop(next(iter(tokens)))
+                tokens[continuation_token] = {
+                    "project_id": project_id,
+                    "relationship_type": str(mapping_payload.get("relationship_type") or "prodrug_of"),
+                    "pairs": mapping_payload.get("pairs"),
+                    "pair_text": mapping_payload.get("pair_text"),
+                }
+            preview["continuation_token"] = continuation_token
         return jsonify(preview), 200
+
+    def _safe_relationship_error_details(details: Any) -> dict[str, Any]:
+        """Keep save failures bounded and free of user-supplied notes/tokens."""
+        if not isinstance(details, dict):
+            return {}
+        if details.get("error") == "duplicate_relationship":
+            return {
+                "error": "duplicate_relationship",
+                "existing_relationship_id": details.get("existing_relationship_id"),
+            }
+        safe: dict[str, Any] = {}
+        for key in ("total_count", "valid_count", "invalid_count"):
+            if key in details:
+                try:
+                    safe[key] = max(0, min(MAX_PAIR_ROWS, int(details[key])))
+                except (TypeError, ValueError):
+                    pass
+        invalid_rows = []
+        for row in details.get("invalid", [])[:200] if isinstance(details.get("invalid"), list) else []:
+            if not isinstance(row, dict):
+                continue
+            codes = []
+            for error in row.get("errors", []) if isinstance(row.get("errors"), list) else []:
+                text = str(error).lower()
+                if "blank" in text:
+                    code = "blank_reference"
+                elif "not found" in text:
+                    code = "unknown_compound"
+                elif "ambiguous" in text:
+                    code = "ambiguous_compound"
+                elif "different compounds" in text:
+                    code = "self_pair"
+                elif "more than once" in text:
+                    code = "duplicate_pair"
+                elif "contain prodrug and active" in text or "object" in text:
+                    code = "malformed_row"
+                else:
+                    code = "invalid_mapping"
+                if code not in codes:
+                    codes.append(code)
+            invalid_rows.append({
+                "line": row.get("line"),
+                "source_index": row.get("source_index"),
+                "source_line": row.get("source_line"),
+                "source_row": row.get("source_row"),
+                "error_codes": codes or ["invalid_mapping"],
+            })
+        if invalid_rows:
+            safe["invalid_rows"] = invalid_rows
+            safe["invalid_rows_truncated"] = len(details.get("invalid", [])) > len(invalid_rows)
+        return safe
 
     @app.post("/api/v1/compound-relationships")
     def save_compound_relationships_api():
@@ -1094,6 +1295,13 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         project = _get_project(app, project_id)
         if project is None or not _project_access(app, project_id, "editor"):
             return jsonify(error="project_forbidden", message="Editor access is required to save compound relationships."), 403
+        supplied_mapping = [key for key in ("pairs", "pair_text") if payload.get(key) is not None]
+        if len(supplied_mapping) != 1:
+            return jsonify(error="invalid_relationship_mapping", message="Provide exactly one of pairs or pair_text."), 422
+        if payload.get("relationship_type", "prodrug_of") != "prodrug_of":
+            return jsonify(error="invalid_relationship_type", message="Only the prodrug_of relationship is supported."), 422
+        if payload.get("user_confirmed") is not None and payload.get("user_confirmed") is not True:
+            return jsonify(error="confirmation_required", message="user_confirmed must be exactly true."), 422
         try:
             result = save_relationships(
                 app.config["DATABASE_PATH"],
@@ -1104,7 +1312,8 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
                 request_id=g.get("request_id"),
             )
         except ProdrugRelationshipError as exc:
-            return jsonify(error="invalid_relationship_mapping", message=str(exc), details=exc.details), 422
+            status = 409 if exc.details.get("error") == "duplicate_relationship" else 422
+            return jsonify(error=exc.details.get("error", "invalid_relationship_mapping"), message=str(exc), details=_safe_relationship_error_details(exc.details)), status
         return jsonify(result), 201
 
     @app.post("/api/v1/analysis/prodrug-comparison")
@@ -1114,13 +1323,66 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         project_id = str(payload.get("project_id") or "").strip()
         endpoint_key = str(payload.get("endpoint_key") or "").strip()
         project = _get_project(app, project_id)
-        if project is None or not _project_access(app, project_id, "viewer"):
-            return jsonify(error="project_forbidden", message="Viewer access is required for prodrug comparison."), 403
+        persist = payload.get("persist", False) is True
+        required_role = "editor" if persist else "viewer"
+        if project is None or not _project_access(app, project_id, required_role):
+            message = "Editor access is required for durable prodrug comparison." if persist else "Viewer access is required for prodrug comparison."
+            return jsonify(error="project_forbidden", message=message), 403
+        relationship_ids = payload.get("relationship_ids")
+        if relationship_ids is not None and (not isinstance(relationship_ids, list) or not relationship_ids):
+            return jsonify(error="invalid_relationship_selection", message="relationship_ids must be omitted or a non-empty list."), 422
+        if isinstance(relationship_ids, list) and len(set(relationship_ids)) != len(relationship_ids):
+            return jsonify(error="invalid_relationship_selection", message="relationship_ids must not contain duplicates."), 422
         try:
-            result = compare_relationships(app.config["DATABASE_PATH"], project_id, endpoint_key)
+            offset = max(0, int(payload.get("offset", 0)))
+            limit = min(500, max(1, int(payload.get("limit", 500))))
+            if payload.get("persist", False) is True:
+                result = persist_comparison(
+                    app.config["DATABASE_PATH"], project_id, endpoint_key,
+                    relationship_ids=relationship_ids,
+                    actor_user_id=current_user_id(app.config["DATABASE_PATH"]) if app.config["SAR_ENV"] == "production" else None,
+                    request_id=g.get("request_id"), offset=offset, limit=limit,
+                )
+            else:
+                result = compare_relationships(app.config["DATABASE_PATH"], project_id, endpoint_key, relationship_ids=relationship_ids, offset=offset, limit=limit)
+                result["persistence"] = "ephemeral"
+                result["data_origin"] = "derived"
+        except sqlite3.OperationalError as exc:
+            if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+                return jsonify(error="analysis_conflict", message="The comparison conflicted with a concurrent source update; no analysis was stored."), 409
+            raise
         except ProdrugRelationshipError as exc:
-            return jsonify(error="invalid_prodrug_comparison", message=str(exc)), 422
+            return jsonify(error="invalid_relationship_selection", message=str(exc), details=exc.details), 422
+        except (ValueError, TypeError):
+            return jsonify(error="invalid_pagination", message="offset and limit must be bounded integers."), 422
+        except Exception as exc:
+            message = str(exc).lower()
+            if any(token in message for token in ("serialization", "deadlock", "could not serialize", "lock timeout", "database is locked")):
+                return jsonify(error="analysis_conflict", message="The comparison conflicted with a concurrent source update; no analysis was stored."), 409
+            raise
         return jsonify(result), 201
+
+    @app.get("/api/v1/analysis/prodrug-comparison/<run_id>")
+    def get_prodrug_comparison_api(run_id: str):
+        _ensure_database(app)
+        project_id = str(request.args.get("project_id") or "").strip()
+        if not project_id or _get_project(app, project_id) is None or not _project_access(app, project_id, "viewer"):
+            return jsonify(error="analysis_not_found", message="The analysis is not available."), 404
+        try:
+            offset = max(0, int(request.args.get("offset", 0)))
+            limit = min(500, max(1, int(request.args.get("limit", 500))))
+        except (TypeError, ValueError):
+            return jsonify(error="invalid_pagination", message="offset and limit must be bounded integers."), 422
+        with read_connection(app.config["DATABASE_PATH"]) as connection:
+            row = connection.execute("SELECT * FROM analysis_runs WHERE id = ? AND project_id = ? AND analysis_type = 'prodrug_comparison'", (run_id, project_id)).fetchone()
+            if row is None:
+                return jsonify(error="analysis_not_found", message="The analysis is not available."), 404
+            snapshot = json.loads(row["input_selection_json"] or "{}")
+            audit = connection.execute("SELECT id FROM audit_events WHERE project_id = ? AND resource_type = 'analysis_run' AND resource_id = ? AND operation = 'prodrug_comparison' ORDER BY created_at DESC, id DESC LIMIT 1", (project_id, run_id)).fetchone()
+        pairs = snapshot.get("pairs", [])
+        page = pairs[offset:offset + limit]
+        return jsonify({**snapshot, "analysis_run_id": run_id, "audit_event_id": snapshot.get("audit_event_id") or (audit["id"] if audit else None), "persistence": "durable", "data_origin": "derived", "offset": offset, "returned": len(page), "has_more": offset + len(page) < len(pairs), "next_offset": offset + len(page) if offset + len(page) < len(pairs) else None, "pairs": page})
+
 
     @app.post("/api/v1/imports/<import_id>/commit")
     def commit_import_api(import_id: str):
@@ -1131,14 +1393,46 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             return jsonify(error="project_required", message="project_id is required to commit an import."), 422
         if _get_project(app, project_id) is None or not _project_access(app, project_id, "editor"):
             return jsonify(error="project_forbidden", message="Editor access is required for this project."), 403
+        if payload.get("mcp_request"):
+            if payload.get("user_confirmed") is not True:
+                return jsonify(error="confirmation_required", message="user_confirmed must be exactly true."), 422
+            if payload.get("reviewed_all_rows") is not True or "reviewed_row_count" not in payload:
+                return jsonify(error="review_required", message="reviewed_all_rows and reviewed_row_count are required for MCP import commits."), 422
+        elif "user_confirmed" in payload and payload.get("user_confirmed") is not True:
+            return jsonify(error="confirmation_required", message="user_confirmed must be exactly true."), 422
+        if payload.get("mcp_request") and payload.get("reviewed_all_rows") is not True:
+            return jsonify(error="review_required", message="reviewed_all_rows must be exactly true."), 422
+        if "reviewed_all_rows" in payload and payload.get("reviewed_all_rows") is not True:
+            return jsonify(error="review_required", message="reviewed_all_rows must be exactly true."), 422
+        if payload.get("mcp_request") and "reviewed_row_count" not in payload:
+            return jsonify(error="review_required", message="reviewed_row_count is required for MCP import commits."), 422
         if not _import_access(app, import_id, project_id=project_id):
             return jsonify(error="import_forbidden", message="This import is not available to the authenticated user."), 403
+        if "reviewed_row_count" in payload:
+            try:
+                reviewed_count = int(payload["reviewed_row_count"])
+            except (TypeError, ValueError):
+                return jsonify(error="review_required", message="reviewed_row_count must be an integer."), 422
+            with read_connection(app.config["DATABASE_PATH"]) as connection:
+                count_row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM import_rows AS ir
+                    JOIN import_batches AS ib ON ib.id = ir.import_batch_id
+                    WHERE ir.import_batch_id = ? AND ib.project_id = ?
+                    """,
+                    (import_id, project_id),
+                ).fetchone()
+            if count_row is None or reviewed_count != int(count_row["count"]):
+                return jsonify(error="stale_import_review", message="reviewed_row_count does not match the current staged import."), 409
         try:
             result = commit_import(
                 app.config["DATABASE_PATH"],
                 import_id,
                 project_id,
                 actor_user_id=current_user_id(app.config["DATABASE_PATH"]) if app.config["SAR_ENV"] == "production" else None,
+                reviewed_all_rows=payload.get("reviewed_all_rows") if payload.get("mcp_request") else None,
+                reviewed_row_count=payload.get("reviewed_row_count") if payload.get("mcp_request") else None,
             )
         except ImportConflictError as exc:
             return jsonify(error="import_conflict", message=str(exc)), 409
@@ -1149,6 +1443,9 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
     @app.get("/api/v1/imports/<import_id>")
     def get_import_api(import_id: str):
         _ensure_database(app)
+        project_id = str(request.args.get("project_id") or "").strip()
+        if not project_id:
+            return jsonify(error="import_not_found"), 404
         with read_connection(app.config["DATABASE_PATH"]) as connection:
             batch = connection.execute(
                 """
@@ -1157,19 +1454,27 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
                        sd.byte_size AS source_byte_size, sd.sha256 AS source_sha256
                 FROM import_batches ib
                 JOIN source_documents sd ON sd.id = ib.source_document_id
-                WHERE ib.id = ?
+                WHERE ib.id = ? AND ib.project_id = ?
                 """,
-                (import_id,),
+                (import_id, project_id),
             ).fetchone()
             if batch is None:
                 return jsonify(error="import_not_found"), 404
             if not _import_access(app, import_id, project_id=batch["project_id"]):
                 return jsonify(error="import_forbidden", message="This import is not available to the authenticated user."), 403
-            rows = []
-            for row in connection.execute(
-                "SELECT source_row_id, validation_json, source_location_json, status FROM import_rows WHERE import_batch_id = ? ORDER BY CAST(source_row_id AS INTEGER)",
+            all_rows = list(connection.execute(
+                "SELECT id, source_row_id, validation_json, source_location_json, status FROM import_rows WHERE import_batch_id = ?",
                 (import_id,),
-            ):
+            ))
+            all_rows.sort(key=lambda row: _stable_import_order(row["source_row_id"], row["id"]))
+            try:
+                offset = max(0, int(request.args.get("offset", 0)))
+                limit = min(500, max(1, int(request.args.get("limit", 500))))
+            except (TypeError, ValueError):
+                return jsonify(error="invalid_pagination", message="offset and limit must be bounded integers."), 422
+            selected_rows = all_rows[offset:offset + limit]
+            rows = []
+            for row in selected_rows:
                 row_result = _row_dict(row)
                 row_result["validation"] = json.loads(row_result.pop("validation_json") or "{}")
                 row_result["source_location"] = json.loads(row_result.pop("source_location_json") or "{}")
@@ -1187,7 +1492,13 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             "sha256": result.pop("source_sha256"),
         }
         result["rows"] = rows
-        result["data_origin"] = "imported"
+        result["total"] = len(all_rows)
+        result["offset"] = offset
+        result["returned"] = len(rows)
+        result["has_more"] = offset + len(rows) < len(all_rows)
+        result["next_offset"] = offset + len(rows) if offset + len(rows) < len(all_rows) else None
+        result["stable_order"] = "numeric_source_row_prefix,source_row_id,import_row_id"
+        result["data_origin"] = "imported" if result.get("status") == "committed" else "quarantined_import"
         return jsonify(result)
 
     @app.get("/api/v1/measurements")
@@ -1411,6 +1722,22 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
             return jsonify(error="rgroup_unavailable", message=str(exc)), 422
         return jsonify(result), 201
 
+    @app.get("/api/v1/analysis/rgroup/<run_id>")
+    def get_rgroup_analysis_api(run_id: str):
+        if app.config["SAR_DEMO_MODE"]:
+            return jsonify(error="demo_mode", message="R-group analysis is disabled for illustrative data."), 409
+        _ensure_database(app)
+        project_id = str(request.args.get("project_id") or "").strip()
+        if not project_id or _get_project(app, project_id) is None or not _project_access(app, project_id, "viewer"):
+            return jsonify(error="analysis_not_found", message="The analysis is not available."), 404
+        try:
+            offset = max(0, int(request.args.get("offset", 0)))
+            limit = min(500, max(1, int(request.args.get("limit", 200))))
+        except (TypeError, ValueError):
+            return jsonify(error="invalid_pagination", message="offset and limit must be bounded integers."), 422
+        result = get_rgroup_run(app.config["DATABASE_PATH"], run_id, project_id, offset=offset, limit=limit)
+        return jsonify(result) if result is not None else (jsonify(error="analysis_not_found"), 404)
+
     @app.post("/api/v1/analysis/pharmacophore-rgroup")
     def create_pharmacophore_rgroup_analysis_api():
         if app.config["SAR_DEMO_MODE"]:
@@ -1471,6 +1798,22 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         except (RGroupAnalysisError, ValueError) as exc:
             return jsonify(error="cliff_unavailable", message=str(exc)), 422
         return jsonify(result), 201
+
+    @app.get("/api/v1/analysis/activity-cliffs/<run_id>")
+    def get_activity_cliff_analysis_api(run_id: str):
+        if app.config["SAR_DEMO_MODE"]:
+            return jsonify(error="demo_mode", message="Activity-cliff analysis is disabled for illustrative data."), 409
+        _ensure_database(app)
+        project_id = str(request.args.get("project_id") or "").strip()
+        if not project_id or _get_project(app, project_id) is None or not _project_access(app, project_id, "viewer"):
+            return jsonify(error="analysis_not_found", message="The analysis is not available."), 404
+        try:
+            offset = max(0, int(request.args.get("offset", 0)))
+            limit = min(500, max(1, int(request.args.get("limit", 200))))
+        except (TypeError, ValueError):
+            return jsonify(error="invalid_pagination", message="offset and limit must be bounded integers."), 422
+        result = get_activity_cliff_run(app.config["DATABASE_PATH"], run_id, project_id, offset=offset, limit=limit)
+        return jsonify(result) if result is not None else (jsonify(error="analysis_not_found"), 404)
 
     @app.post("/api/v1/analysis/selectivity")
     def create_selectivity_analysis_api():
@@ -2165,6 +2508,67 @@ def _production_compounds(app: Flask, project_id: str) -> list[dict[str, Any]]:
     return result
 
 
+def _production_staged_import_context(app: Flask, project_id: str, import_id: str) -> dict[str, Any]:
+    """Load only project-owned staged state for the evidence deep link."""
+    with read_connection(app.config["DATABASE_PATH"]) as connection:
+        batch = connection.execute(
+            """
+            SELECT ib.id, ib.project_id, ib.status, ib.created_at,
+                   sd.filename, sd.file_format, sd.sha256
+            FROM import_batches ib
+            JOIN source_documents sd ON sd.id = ib.source_document_id
+            WHERE ib.id = ? AND ib.project_id = ?
+            """,
+            (import_id, project_id),
+        ).fetchone()
+        if batch is None:
+            return {"state": "not-found", "import_id": import_id}
+        all_rows = list(connection.execute(
+            """
+            SELECT id, source_row_id, validation_json, source_location_json, status
+            FROM import_rows WHERE import_batch_id = ?
+            """,
+            (import_id,),
+        ))
+    all_rows.sort(key=lambda row: _stable_import_order(row["source_row_id"], row["id"]))
+    rows = []
+    for row in all_rows[:100]:
+        item = _row_dict(row)
+        item["validation"] = json.loads(item.pop("validation_json") or "{}")
+        item["source_location"] = json.loads(item.pop("source_location_json") or "{}")
+        rows.append(item)
+    return {
+        "state": "ready",
+        "import_id": import_id,
+        "status": batch["status"],
+        "filename": batch["filename"],
+        "file_format": batch["file_format"],
+        "sha256": batch["sha256"],
+        "total": len(all_rows),
+        "rows": rows,
+        "data_origin": "imported" if batch["status"] == "committed" else "quarantined_import",
+    }
+
+
+def _production_evidence_context(app: Flask, project_id: str, *, compound_id: str = "", measurement_id: str = "", summary_id: str = "") -> dict[str, Any]:
+    """Validate evidence identifiers against the requested project before rendering them."""
+    with read_connection(app.config["DATABASE_PATH"]) as connection:
+        compound = connection.execute("SELECT id FROM compounds WHERE id = ? AND project_id = ?", (compound_id, project_id)).fetchone() if compound_id else None
+        measurement = connection.execute(
+            "SELECT m.id FROM measurements m JOIN compounds c ON c.id = m.compound_id WHERE m.id = ? AND c.project_id = ?",
+            (measurement_id, project_id),
+        ).fetchone() if measurement_id else None
+        summary = connection.execute(
+            "SELECT ms.id FROM measurement_summaries ms JOIN compounds c ON c.id = ms.compound_id WHERE ms.id = ? AND c.project_id = ?",
+            (summary_id, project_id),
+        ).fetchone() if summary_id else None
+    requested = {"compound_id": compound_id, "measurement_id": measurement_id, "summary_id": summary_id}
+    found = {"compound_id": compound is not None, "measurement_id": measurement is not None, "summary_id": summary is not None}
+    if any(value and not found[key] for key, value in requested.items()):
+        return {"state": "not-found", **requested}
+    return {"state": "ready" if any(requested.values()) else "empty", **requested}
+
+
 def _production_measurements(app: Flask, project_id: str) -> list[dict[str, Any]]:
     with read_connection(app.config["DATABASE_PATH"]) as connection:
         rows = connection.execute(
@@ -2822,6 +3226,8 @@ def _production_page_context(app: Flask, project: dict[str, Any] | None) -> dict
             "sar_endpoints": [],
             "prediction_models": [],
             "sar_matrix": {"endpoints": [], "rows": [], "data_origin": "derived"},
+            "staged_import_context": {"state": "empty"},
+            "evidence_context": {"state": "empty"},
         }
     project_id = project["id"]
     compounds = _production_compounds(app, project_id)

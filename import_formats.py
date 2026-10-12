@@ -14,6 +14,8 @@ scientific interpretations and must not replace the original upload.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
 import io
 import posixpath
@@ -43,6 +45,21 @@ class SheetSelectionRequired(UploadFormatError):
     def __init__(self, profile: dict[str, Any]):
         super().__init__("Select a worksheet before previewing this Excel file")
         self.profile = profile
+
+
+def decode_base64_upload(value: Any, *, max_bytes: int) -> bytes:
+    """Decode one strict RFC 4648 payload without accepting data URIs or whitespace."""
+    if not isinstance(value, str) or not value:
+        raise UploadFormatError("content_base64 must be a non-empty RFC 4648 base64 string")
+    if value.startswith("data:") or any(character.isspace() for character in value):
+        raise UploadFormatError("content_base64 must not contain a data-URI prefix or whitespace")
+    try:
+        decoded = base64.b64decode(value.encode("ascii"), validate=True)
+    except (UnicodeEncodeError, binascii.Error, ValueError) as exc:
+        raise UploadFormatError("content_base64 is not valid RFC 4648 base64") from exc
+    if len(decoded) > max_bytes:
+        raise UploadFormatError(f"Decoded upload exceeds the {max_bytes} byte limit")
+    return decoded
 
 
 @dataclass(frozen=True)

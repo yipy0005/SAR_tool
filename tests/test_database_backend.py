@@ -40,6 +40,7 @@ def test_postgres_database_detection_and_transaction_mode():
     assert is_postgres_database("postgres://user:password@db.example/sar")
     assert not is_postgres_database("/secure/path/sar.db")
     assert _begin_statement("postgresql://db/sar") == "BEGIN"
+    assert _begin_statement("postgresql://db/sar", isolation_level="repeatable read") == "BEGIN ISOLATION LEVEL REPEATABLE READ"
     assert _begin_statement("/secure/path/sar.db") == "BEGIN IMMEDIATE"
 
 

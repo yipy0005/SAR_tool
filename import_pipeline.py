@@ -34,6 +34,15 @@ SCIENTIFIC_FORMULA_FIELDS = frozenset((*REQUIRED_MAPPING_FIELDS, "qualifier"))
 FORMULA_POLICY_VERSION = "formula-safe-v1"
 
 
+def _stable_row_key(source_row_id: Any, row_id: Any = "") -> tuple[int, str, str]:
+    text = str(source_row_id or "")
+    try:
+        prefix = int(text.split(":", 1)[0])
+    except ValueError:
+        prefix = 2**31 - 1
+    return prefix, text, str(row_id or "")
+
+
 class ImportValidationError(ValueError):
     pass
 
@@ -117,8 +126,8 @@ def infer_mapping(
     for field in FIELD_ALIASES:
         selected = str(overrides.get(field, "")).strip()
         if selected:
-            if selected not in candidates[field]:
-                raise ImportValidationError(f"Mapping override for {field} does not identify a matching source column")
+            if selected not in keys:
+                raise ImportValidationError(f"Mapping override for {field} does not identify a source column")
             mapping[field] = selected
         else:
             mapping[field] = candidates[field][0] if len(candidates[field]) == 1 else None
@@ -189,7 +198,7 @@ def infer_wide_endpoint_mapping(
                     explicit_unit = False
                     break
         lookup = base.replace("_", "")
-        if not unit or (base not in _WIDE_ENDPOINT_DEFAULTS and lookup not in _WIDE_ENDPOINT_DEFAULTS):
+        if not unit:
             continue
         label, default_unit = _WIDE_ENDPOINT_DEFAULTS.get(
             base,
@@ -229,9 +238,12 @@ def _write_quarantine_file(content: bytes, upload_dir: str, sha256: str) -> str:
     return str(target)
 
 
-def _public_preview(import_id: str, source_id: str, preview: dict[str, Any]) -> dict[str, Any]:
+def _public_preview(import_id: str, source_id: str, preview: dict[str, Any], *, offset: int = 0, limit: int = 500) -> dict[str, Any]:
+    all_preview_rows = preview["rows"]
+    start = max(0, int(offset))
+    end = min(len(all_preview_rows), start + max(1, int(limit)))
     rows = []
-    for row in preview["rows"]:
+    for row in all_preview_rows[start:end]:
         rows.append(
             {
                 "source_row_id": row.source_row_id,
@@ -267,6 +279,12 @@ def _public_preview(import_id: str, source_id: str, preview: dict[str, Any]) -> 
         "accepted_count": preview["accepted_count"],
         "rejected_count": preview["rejected_count"],
         "warning_count": preview["warning_count"],
+        "total": len(all_preview_rows),
+        "offset": start,
+        "returned": len(rows),
+        "has_more": end < len(all_preview_rows),
+        "next_offset": end if end < len(all_preview_rows) else None,
+        "stable_order": "numeric_source_row_prefix,source_row_id,input_row_order",
         "rows": rows,
     }
 
@@ -524,6 +542,8 @@ def create_preview(
     data_start_row: int | None = None,
     mapping_overrides: dict[str, str] | None = None,
     formula_acknowledged: bool = False,
+    offset: int = 0,
+    limit: int = 500,
 ) -> dict[str, Any]:
     preview = preview_upload(
         content,
@@ -729,7 +749,7 @@ def create_preview(
                 now,
             ),
         )
-    return _public_preview(import_id, source_id, preview)
+    return _public_preview(import_id, source_id, preview, offset=offset, limit=limit)
 
 
 def _get_or_create_project(connection: Any, project_id: str) -> None:
@@ -744,42 +764,41 @@ def commit_import(
     project_id: str,
     *,
     actor_user_id: str | None = None,
+    reviewed_all_rows: bool | None = None,
+    reviewed_row_count: int | None = None,
 ) -> dict[str, Any]:
-    with read_connection(database_path) as connection:
+    assay_runs: dict[str, str] = {}
+    inserted_compounds = 0
+    inserted_measurements = 0
+    with transaction(database_path, isolation_level="repeatable read") as connection:
         batch = connection.execute(
             """
             SELECT ib.*, sd.id AS source_id, sd.sha256, sd.storage_path, sd.filename
             FROM import_batches ib
             JOIN source_documents sd ON sd.id = ib.source_document_id
-            WHERE ib.id = ?
+            WHERE ib.id = ? AND (ib.project_id = ? OR ib.project_id IS NULL)
             """,
-            (import_id,),
+            (import_id, project_id),
         ).fetchone()
         if batch is None:
             raise ImportValidationError("Import batch was not found")
         if batch["status"] == "committed":
             return {"import_id": import_id, "status": "already_committed", "data_origin": "imported"}
-        rows = connection.execute(
-            "SELECT * FROM import_rows WHERE import_batch_id = ? ORDER BY CAST(source_row_id AS INTEGER)",
+        rows = list(connection.execute(
+            "SELECT * FROM import_rows WHERE import_batch_id = ?",
             (import_id,),
-        ).fetchall()
-    accepted_rows = [row for row in rows if row["status"] == "accepted" and row["normalized_json"]]
-    if not accepted_rows:
-        raise ImportValidationError("Import has no valid rows to commit")
-    now = _now()
-    assay_runs: dict[str, str] = {}
-    inserted_compounds = 0
-    inserted_measurements = 0
-    with transaction(database_path) as connection:
-        current = connection.execute(
-            "SELECT status FROM import_batches WHERE id = ?",
-            (import_id,),
-        ).fetchone()
-        if current is None:
-            raise ImportValidationError("Import batch was not found")
-        if current["status"] == "committed":
-            return {"import_id": import_id, "status": "already_committed", "data_origin": "imported"}
+        ))
+        rows.sort(key=lambda row: _stable_row_key(row["source_row_id"], row["id"]))
+        accepted_rows = [row for row in rows if row["status"] == "accepted" and row["normalized_json"]]
+        if not accepted_rows:
+            raise ImportValidationError("Import has no valid rows to commit")
+        if reviewed_all_rows is not None:
+            if reviewed_all_rows is not True or reviewed_row_count is None:
+                raise ImportValidationError("Complete staged-row review is required before an MCP commit")
+            if int(reviewed_row_count) != len(rows):
+                raise ImportConflictError("reviewed_row_count does not match the current staged import")
         _get_or_create_project(connection, project_id)
+        now = _now()
         for row in accepted_rows:
             normalized = json.loads(row["normalized_json"])
             structure = normalized["structure"]

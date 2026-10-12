@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-001",
+  "type": "refactor",
+  "description": "Establish shared MCP side-effect descriptors, strict validation/output bounds, separate JSON-wire and decoded upload limits, fail-closed allowlists, credential serialization, and catalog drift machinery.",
+  "status": "pending",
+  "steps": [
+    "Extend sar_mcp.toolkit.Tool descriptors with side_effect and accurate read-only/idempotent metadata; keep read/analyze/write availability and derive Kiro autoApprove from side_effect=none read tools.",
+    "Make schema validation traverse every bounded array item and add one-of/cross-field checks before SarClient calls; implement strict RFC 4648 base64 and exact decoded/wire limit arithmetic in config.py/app.py/client.py, including multipart decoded enforcement and safe 413 responses.",
+    "Replace server character slicing with valid JSON fitting, continuation/truncation metadata, and structured response_too_large errors; fail closed for sar_create_project under SAR_MCP_PROJECT_IDS.",
+    "Harden cli.save_credentials/read_credentials_file using JSON string literals, CR/LF rejection, atomic owner-only writes, malformed-value handling, and environment precedence.",
+    "Add sar_mcp.catalog.py with derived mode counts/fingerprint and tests for descriptors, governance names, schema version, expected post-roadmap counts, and documentation markers."
+  ],
+  "acceptance_criteria": [
+    "Invalid one-of, unknown-field, out-of-bound, and non-finite transport arguments make no HTTP call.",
+    "Exactly MAX_UPLOAD_BYTES decoded bytes succeed for JSON and multipart; one additional decoded byte and one additional wire byte fail with 413 and create no batch.",
+    "Successful MCP outputs are parseable JSON; scalar overflow is a structured error and list truncation retains continuation information.",
+    "Configured project allowlists block project creation before HTTP; export is side_effect=audit and not auto-approved.",
+    "Passwords containing quotes/backslashes round-trip without appearing in output, URLs, logs, config, or errors."
+  ],
+  "verification": ["pixi run python -m pytest -q tests/test_mcp_unit.py tests/test_mcp_catalog.py tests/test_production_foundation.py"],
+  "blocked_reason": null,
+  "findings": "Resolves design-review finding 1 directly and supplies the transport prerequisite for finding 11; also implements AC-001, AC-022, AC-023, AC-028, AC-030, AC-031, AC-032."
+}

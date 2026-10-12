@@ -345,4 +345,4 @@ def test_project_and_import_access_are_membership_scoped(monkeypatch, tmp_path):
             "UPDATE import_batches SET created_by_user_id = 'user-other' WHERE id = ?",
             (preview.get_json()["import_id"],),
         )
-    assert client.get(f"/api/v1/imports/{preview.get_json()['import_id']}").status_code == 403
+    assert client.get(f"/api/v1/imports/{preview.get_json()['import_id']}").status_code == 404

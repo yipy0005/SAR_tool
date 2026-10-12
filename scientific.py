@@ -116,6 +116,13 @@ def normalize_measurement(
         token in endpoint for token in ("ic50", "ec50", "ac50", "ki", "kd", "mic")
     )
     wants_pic50 = (canonical_unit or "").lower() == "pic50" or concentration_endpoint
+    if normalized_unit.lower() == "pic50":
+        return NormalizedMeasurement(
+            raw_value_text=raw_text, value_numeric=numeric, unit_ucum=normalized_unit,
+            qualifier=relation, lower_bound=numeric if relation in {">", ">="} else None,
+            upper_bound=numeric if relation in {"<", "<="} else None, canonical_value=numeric,
+            canonical_unit="pIC50", transform_id=None, missing_reason=None,
+        )
     if wants_pic50:
         factor = CONCENTRATION_TO_NM.get(normalized_unit.lower())
         if factor is None:

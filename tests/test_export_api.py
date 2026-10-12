@@ -77,7 +77,10 @@ def test_project_export_json_and_csv_preserve_provenance_and_audit(production_ap
     assert {row["registration_id"] for row in rows if row["registration_id"]} == {"CMP-EXPORT"}
     assert all(row["project_id"] == project_id for row in rows)
     payload["compounds"][0]["registration_id"] = "=HYPERLINK(\"https://example.test\")"
-    assert "'=HYPERLINK" in export_project_csv(payload)
+    export_rows = {**payload, "generated_recommendations": [{"id": "rec_1", "project_id": project_id, "title": "Review", "data_origin": "generated"}], "compound_relationships": [{"id": "rel_1", "project_id": project_id, "data_origin": "imported"}]}
+    csv_text = export_project_csv(export_rows)
+    assert {row["record_type"] for row in csv.DictReader(io.StringIO(csv_text))} >= {"generated_recommendation", "compound_relationship"}
+    assert "'=HYPERLINK" in csv_text
 
     with read_connection(production_app.config["DATABASE_PATH"]) as connection:
         audits = connection.execute(
@@ -88,6 +91,95 @@ def test_project_export_json_and_csv_preserve_provenance_and_audit(production_ap
     assert all(row["outcome"] == "success" for row in audits)
     assert json.loads(audits[-1]["metadata_json"])["row_count"] >= 3
     assert other_project_id != project_id
+
+
+def test_durable_comparison_export_preserves_provenance_in_json_and_csv(production_app):
+    client = production_app.test_client()
+    project_response = client.post("/api/v1/projects", json={"name": "Durable comparison export"})
+    project_id = project_response.get_json()["project"]["id"]
+    imported = client.post(
+        "/api/v1/imports/preview",
+        json={
+            "project_id": project_id,
+            "filename": "comparison.csv",
+            "csv_text": (
+                "compound_id,smiles,assay,result,unit,qualifier\n"
+                "PRO-EXPORT,CCOc1ccccc1,IC50,100,nM,=\n"
+                "ACT-EXPORT,c1ccccc1,IC50,10,nM,=\n"
+            ),
+        },
+    )
+    assert imported.status_code == 201
+    import_id = imported.get_json()["import_id"]
+    assert client.post(f"/api/v1/imports/{import_id}/commit", json={"project_id": project_id}).status_code == 200
+    assert client.post("/api/v1/measurement-summaries/project", json={"project_id": project_id}).status_code == 201
+    saved = client.post(
+        "/api/v1/compound-relationships",
+        json={"project_id": project_id, "pair_text": "PRO-EXPORT,ACT-EXPORT,explicit export mapping"},
+    )
+    assert saved.status_code == 201
+    relationship_id = saved.get_json()["relationship_ids"][0]
+    comparison = client.post(
+        "/api/v1/analysis/prodrug-comparison",
+        json={"project_id": project_id, "endpoint_key": "IC50:import-v1", "persist": True},
+    )
+    assert comparison.status_code == 201
+    comparison_payload = comparison.get_json()
+    run_id = comparison_payload["analysis_run_id"]
+    audit_id = comparison_payload["audit_event_id"]
+
+    with read_connection(production_app.config["DATABASE_PATH"]) as connection:
+        audit_row = connection.execute(
+            "SELECT metadata_json FROM audit_events WHERE id = ? AND project_id = ? AND resource_type = 'analysis_run' AND resource_id = ?",
+            (audit_id, project_id, run_id),
+        ).fetchone()
+    assert audit_row is not None
+    audit_metadata = json.loads(audit_row["metadata_json"])
+    assert audit_metadata["summary_ids"]
+    assert audit_metadata["source_measurement_ids"]
+    assert audit_metadata["evidence_boundary"] == comparison_payload["evidence_boundary"]
+
+    json_payload = client.get(f"/api/v1/exports/project/{project_id}?format=json").get_json()
+    analysis = next(row for row in json_payload["analysis_runs"] if row["id"] == run_id)
+    selection = analysis["input_selection"]
+    pair = selection["pairs"][0]
+    summary_ids = [pair["prodrug"]["result"]["summary_id"], pair["active"]["result"]["summary_id"]]
+    source_measurement_ids = sorted(
+        pair["prodrug"]["result"]["source_measurement_ids"] + pair["active"]["result"]["source_measurement_ids"]
+    )
+    assert analysis["analysis_run_id"] == run_id
+    assert analysis["audit_event_id"] == audit_id
+    assert analysis["relationship_ids"] == [relationship_id]
+    assert sorted(analysis["summary_ids"]) == sorted(summary_ids)
+    assert analysis["source_measurement_ids"] == source_measurement_ids
+    assert audit_metadata["summary_ids"] == sorted(summary_ids)
+    assert audit_metadata["source_measurement_ids"] == source_measurement_ids
+    assert sorted(summary_ids) == sorted(
+        [pair["prodrug"]["result"]["summary_id"], pair["active"]["result"]["summary_id"]]
+    )
+    assert source_measurement_ids and analysis["endpoint_metadata"]["endpoint_key"] == "IC50:import-v1"
+    assert analysis["input_selection"]["evidence_boundary"] == comparison_payload["evidence_boundary"]
+
+    csv_rows = list(csv.DictReader(io.StringIO(client.get(f"/api/v1/exports/project/{project_id}?format=csv").get_data(as_text=True))))
+    csv_analysis = next(row for row in csv_rows if row["record_type"] == "analysis_run" and row["id"] == run_id)
+    csv_metadata = json.loads(csv_analysis["metadata_json"])
+    assert csv_metadata["analysis_run_id"] == run_id
+    assert csv_metadata["audit_event_id"] == audit_id
+    assert csv_metadata["relationship_ids"] == [relationship_id]
+    assert sorted(csv_metadata["summary_ids"]) == sorted(summary_ids)
+    assert csv_metadata["source_measurement_ids"] == source_measurement_ids
+    assert csv_metadata["evidence_boundary"] == analysis["evidence_boundary"]
+    csv_selection = csv_metadata["input_selection"]
+    csv_pair = csv_selection["pairs"][0]
+    assert sorted([csv_pair["prodrug"]["result"]["summary_id"], csv_pair["active"]["result"]["summary_id"]]) == sorted(summary_ids)
+    assert sorted(csv_pair["prodrug"]["result"]["source_measurement_ids"] + csv_pair["active"]["result"]["source_measurement_ids"]) == source_measurement_ids
+    assert csv_metadata["endpoint_metadata"] == analysis["endpoint_metadata"]
+    csv_relationship = next(row for row in csv_rows if row["record_type"] == "compound_relationship" and row["id"] == relationship_id)
+    assert csv_relationship["project_id"] == project_id and csv_relationship["data_origin"] == "imported"
+
+    other_project = _seed_project(client, "Foreign comparison export", "CMP-FOREIGN")
+    foreign_csv = client.get(f"/api/v1/exports/project/{other_project}?format=csv").get_data(as_text=True)
+    assert run_id not in foreign_csv and audit_id not in foreign_csv and relationship_id not in foreign_csv
 
 
 def test_export_is_bounded_and_rejects_invalid_format(production_app):

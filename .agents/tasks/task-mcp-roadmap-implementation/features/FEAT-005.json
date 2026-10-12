@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-005",
+  "type": "feat",
+  "description": "Add structured endpoint comparison with browser parity and complete graph R-group/activity-cliff MCP readback.",
+  "status": "pending",
+  "steps": [
+    "Implement endpoint_comparison_engine.py and its Flask route with endpoint_b none semantics, coverage cross-field validation, case-insensitive registration_id-only q, canonical-unit normalization/mismatch states, finite numeric handling, stable pagination, and no stored browser session.",
+    "Register sar_compare_endpoints as a read/side_effect=none tool with bounded result shaping and Compare links; ensure exact/censored/missing/review/invalid-numeric rows are visible but never silently compared.",
+    "Add stored GET routes/readback mappings for graph rgroup and activity_cliffs with canonical stored analysis types, project/allowlist checks, evidence metadata, pagination, and no drawings/molblocks."
+  ],
+  "acceptance_criteria": [
+    "All endpoint comparison coverage/search combinations match production_explorer.js, including none, review, endpoint-a, both, and registration_id matching.",
+    "Missing-B/both, identical endpoints, unknown endpoints, unit mismatches, non-finite values, foreign projects, and disallowed runs fail safely and deterministically.",
+    "Graph R-group and activity-cliff runs can be read back with bounded project-scoped provenance."
+  ],
+  "verification": ["pixi run python -m pytest -q tests/test_endpoint_comparison.py tests/test_production_analysis_api.py tests/test_mcp_unit.py tests/test_mcp_integration.py"],
+  "blocked_reason": null,
+  "findings": "Resolves review findings 6 and 9; implements AC-015 through AC-017 and AC-021."
+}

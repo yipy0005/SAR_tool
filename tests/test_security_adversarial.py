@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 from app import create_app
 from database import read_connection
-from import_pipeline import commit_import
+import import_pipeline
+from import_pipeline import ImportValidationError, commit_import
 
 
 @pytest.fixture
@@ -212,7 +214,41 @@ def test_concurrent_commit_is_idempotent(production_app):
         assert connection.execute("SELECT status FROM import_batches").fetchone()[0] == "committed"
 
 
-def test_design_evidence_and_parent_compound_are_project_scoped(production_app):
+def test_changed_staged_rows_are_reloaded_inside_commit_snapshot(production_app, monkeypatch):
+    client = production_app.test_client()
+    project_id = client.post("/api/v1/projects", json={"name": "Snapshot import"}).get_json()["project"]["id"]
+    preview = client.post(
+        "/api/v1/imports/preview",
+        json={"csv_text": "compound_id,smiles,assay,result,unit\nCMP-001,CCO,IC50,10,nM,\n"},
+    ).get_json()
+    import_id = preview["import_id"]
+    original_transaction = import_pipeline.transaction
+
+    @contextmanager
+    def changed_snapshot(database_path, **kwargs):
+        with original_transaction(database_path, **kwargs) as connection:
+            connection.execute(
+                "UPDATE import_rows SET status = 'rejected', normalized_json = NULL WHERE import_batch_id = ?",
+                (import_id,),
+            )
+            yield connection
+
+    monkeypatch.setattr(import_pipeline, "transaction", changed_snapshot)
+    with pytest.raises(ImportValidationError, match="no valid rows"):
+        commit_import(
+            production_app.config["DATABASE_PATH"],
+            import_id,
+            project_id,
+            reviewed_all_rows=True,
+            reviewed_row_count=1,
+        )
+
+    with read_connection(production_app.config["DATABASE_PATH"]) as connection:
+        assert connection.execute("SELECT status FROM import_batches WHERE id = ?", (import_id,)).fetchone()["status"] != "committed"
+        assert connection.execute("SELECT COUNT(*) FROM compounds WHERE project_id = ?", (project_id,)).fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 0
+
+
     client = production_app.test_client()
     project_a, summary_a, compound_a = _seed_project(client, "Project A", "A-001", "CCO", "10")
     project_b, summary_b, compound_b = _seed_project(client, "Project B", "B-001", "CCN", "20")

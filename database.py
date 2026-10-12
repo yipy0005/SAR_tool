@@ -92,8 +92,11 @@ def connect(database_path: str) -> Any:
     return connection
 
 
-def _begin_statement(database_path: str) -> str:
-    return "BEGIN" if is_postgres_database(database_path) else "BEGIN IMMEDIATE"
+def _begin_statement(database_path: str, isolation_level: str | None = None) -> str:
+    if is_postgres_database(database_path):
+        suffix = f" ISOLATION LEVEL {isolation_level.upper()}" if isolation_level else ""
+        return f"BEGIN{suffix}"
+    return "BEGIN IMMEDIATE"
 
 
 def _statements(script: str) -> list[str]:
@@ -165,9 +168,9 @@ def apply_migrations(database_path: str, migrations_dir: Path = MIGRATIONS_DIR) 
 
 
 @contextmanager
-def transaction(database_path: str) -> Iterator[sqlite3.Connection]:
+def transaction(database_path: str, *, isolation_level: str | None = None) -> Iterator[sqlite3.Connection]:
     connection = connect(database_path)
-    connection.execute(_begin_statement(database_path))
+    connection.execute(_begin_statement(database_path, isolation_level=isolation_level))
     try:
         yield connection
         connection.commit()

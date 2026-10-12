@@ -316,3 +316,143 @@ def run_activity_cliff_analysis(
             ),
         )
     return {"analysis_run_id": run_id, "analysis_type": "activity_cliff", "algorithm_version": ANALYSIS_VERSION, "cliff_count": len(cliffs), "cliffs": cliffs, "data_origin": "derived"}
+
+
+_RGROUP_EVIDENCE_BOUNDARY = (
+    "R-group assignments are structure-derived. Summary and source-measurement IDs identify "
+    "project evidence available for each compound; they do not establish causation."
+)
+_ACTIVITY_CLIFF_EVIDENCE_BOUNDARY = (
+    "Activity cliffs are derived from the stored compatible summaries and structures. "
+    "Summary and source-measurement IDs identify the contributing evidence; the effect is an association, not causal proof."
+)
+
+
+def _json_list(value: Any) -> list[Any]:
+    try:
+        parsed = json.loads(value or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def get_rgroup_run(
+    database_path: str,
+    run_id: str,
+    project_id: str,
+    *,
+    offset: int = 0,
+    limit: int = 200,
+) -> dict[str, Any] | None:
+    with read_connection(database_path) as connection:
+        run = connection.execute(
+            "SELECT * FROM analysis_runs WHERE id = ? AND project_id = ? AND analysis_type = 'rgroup'",
+            (run_id, project_id),
+        ).fetchone()
+        if run is None:
+            return None
+        rows = connection.execute(
+            """
+            SELECT ra.*, c.registration_id
+            FROM rgroup_assignments ra
+            JOIN compounds c ON c.id = ra.compound_id
+            WHERE ra.analysis_run_id = ? AND c.project_id = ?
+            ORDER BY c.registration_id, ra.compound_id, ra.id
+            """,
+            (run_id, project_id),
+        ).fetchall()
+        summary_rows = connection.execute(
+            """
+            SELECT ms.compound_id, ms.id AS summary_id, ms.source_measurement_ids_json
+            FROM measurement_summaries ms
+            JOIN rgroup_assignments ra ON ra.compound_id = ms.compound_id
+            JOIN compounds c ON c.id = ms.compound_id
+            WHERE ra.analysis_run_id = ? AND c.project_id = ?
+            ORDER BY ms.compound_id, ms.created_at, ms.id
+            """,
+            (run_id, project_id),
+        ).fetchall()
+    evidence_by_compound: dict[str, dict[str, set[str]]] = {}
+    for summary in summary_rows:
+        compound_id = str(summary["compound_id"])
+        evidence = evidence_by_compound.setdefault(compound_id, {"summary_ids": set(), "source_measurement_ids": set()})
+        evidence["summary_ids"].add(str(summary["summary_id"]))
+        evidence["source_measurement_ids"].update(str(item) for item in _json_list(summary["source_measurement_ids_json"]) if item)
+    assignments = []
+    for row in rows:
+        item = dict(row)
+        item["match_atoms"] = json.loads(item.pop("match_atoms_json") or "[]")
+        item["assignments"] = json.loads(item.pop("assignments_json") or "{}")
+        evidence = evidence_by_compound.get(str(item["compound_id"]), {"summary_ids": set(), "source_measurement_ids": set()})
+        item["summary_ids"] = sorted(evidence["summary_ids"])
+        item["source_measurement_ids"] = sorted(evidence["source_measurement_ids"])
+        item["evidence_boundary"] = _RGROUP_EVIDENCE_BOUNDARY
+        item["data_origin"] = "derived"
+        assignments.append(item)
+    start = max(0, int(offset))
+    page = assignments[start:start + max(1, int(limit))]
+    result = dict(run)
+    result["input_selection"] = json.loads(result.pop("input_selection_json") or "{}")
+    result.update({"analysis_run_id": run_id, "assignments": page, "total": len(assignments), "offset": start,
+                   "returned": len(page), "has_more": start + len(page) < len(assignments),
+                   "next_offset": start + len(page) if start + len(page) < len(assignments) else None,
+                   "evidence_boundary": _RGROUP_EVIDENCE_BOUNDARY,
+                   "data_origin": "derived"})
+    return result
+
+
+def get_activity_cliff_run(
+    database_path: str,
+    run_id: str,
+    project_id: str,
+    *,
+    offset: int = 0,
+    limit: int = 200,
+) -> dict[str, Any] | None:
+    with read_connection(database_path) as connection:
+        run = connection.execute(
+            "SELECT * FROM analysis_runs WHERE id = ? AND project_id = ? AND analysis_type = 'activity_cliff'",
+            (run_id, project_id),
+        ).fetchone()
+        if run is None:
+            return None
+        rows = connection.execute(
+            """
+            SELECT ac.*, ca.registration_id AS compound_a_registration_id,
+                   cb.registration_id AS compound_b_registration_id,
+                   msa.source_measurement_ids_json AS source_measurement_ids_a_json,
+                   msb.source_measurement_ids_json AS source_measurement_ids_b_json
+            FROM activity_cliffs ac
+            JOIN compounds ca ON ca.id = ac.compound_a_id
+            JOIN compounds cb ON cb.id = ac.compound_b_id
+            LEFT JOIN measurement_summaries msa ON msa.id = ac.summary_a_id
+            LEFT JOIN measurement_summaries msb ON msb.id = ac.summary_b_id
+            WHERE ac.analysis_run_id = ? AND ca.project_id = ? AND cb.project_id = ?
+            ORDER BY ca.registration_id, cb.registration_id, ac.id
+            """,
+            (run_id, project_id, project_id),
+        ).fetchall()
+    cliffs = []
+    for row in rows:
+        item = dict(row)
+        source_a = _json_list(item.pop("source_measurement_ids_a_json", None))
+        source_b = _json_list(item.pop("source_measurement_ids_b_json", None))
+        item["summary_a_source_measurement_ids"] = source_a
+        item["summary_b_source_measurement_ids"] = source_b
+        item["source_measurement_ids"] = sorted({str(source_id) for source_id in source_a + source_b if source_id})
+        item["summary_ids"] = [summary_id for summary_id in (item.get("summary_a_id"), item.get("summary_b_id")) if summary_id]
+        item["evidence_boundary"] = _ACTIVITY_CLIFF_EVIDENCE_BOUNDARY
+        item["transformation"] = json.loads(item.pop("transformation_json") or "{}")
+        item["data_origin"] = "derived"
+        cliffs.append(item)
+    start = max(0, int(offset))
+    page = cliffs[start:start + max(1, int(limit))]
+    result = dict(run)
+    result["input_selection"] = json.loads(result.pop("input_selection_json") or "{}")
+    result.update({"analysis_run_id": run_id, "analysis_type": "activity_cliff", "cliffs": page,
+                   "total": len(cliffs), "offset": start, "returned": len(page),
+                   "has_more": start + len(page) < len(cliffs),
+                   "next_offset": start + len(page) if start + len(page) < len(cliffs) else None,
+                   "evidence_boundary": _ACTIVITY_CLIFF_EVIDENCE_BOUNDARY,
+                   "data_origin": "derived"})
+    return result

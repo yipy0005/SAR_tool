@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-006",
+  "type": "feat",
+  "description": "Complete safe deep links and browser URL-state initialization without breaking existing Compare or SAR links.",
+  "status": "pending",
+  "steps": [
+    "Add named Links builders for staged import review, prodrug mode/endpoint/relationship/comparison run, exact evidence, and Compare state, with bounded safe identifiers and public-origin separation.",
+    "Preserve endpoint_a/endpoint_b/stage/coverage/q/selected and existing run/search/project links; dual-read selected_compound_id if used and canonical-write selected; validate requested project ownership before state selection.",
+    "Update production_sar.js to initialize mode/endpoint/comparison/relationship state with valid-project precedence and safe markers, and add route/template/static marker tests for import, prodrug, evidence, Compare, and proxy links."
+  ],
+  "acceptance_criteria": [
+    "Old and new safe links open the intended project state; invalid or foreign IDs never fall back to another project.",
+    "URLs exclude raw pair text, workbook/base64 bytes, credentials, CSRF/session tokens, control characters, traversal, and cross-project state.",
+    "Compare browser keys remain compatible and SAR prodrug mode/endpoint state is actually initialized by the checked-in JavaScript."
+  ],
+  "verification": ["pixi run python -m pytest -q tests/test_deep_links.py tests/test_production_dashboard.py tests/test_mcp_unit.py tests/test_mcp_integration.py"],
+  "blocked_reason": null,
+  "findings": "Resolves review finding 7 and implements AC-018 through AC-020."
+}

@@ -291,7 +291,7 @@
   const requestedStage = urlState.get("stage") || "";
   const requestedCoverage = urlState.get("coverage") || "";
   const requestedQuery = urlState.get("q");
-  const requestedSelected = urlState.get("selected") || "";
+  const requestedSelected = urlState.get("selected") || urlState.get("selected_compound_id") || "";
   const initialA = endpointById.has(requestedA)
     ? requestedA
     : endpointById.has(savedState.endpointA) ? savedState.endpointA : defaultA;

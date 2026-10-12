@@ -1,0 +1,94 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "title": "Base64 wire-size limit conflicts with the existing Flask upload limit",
+      "location": "Shared contracts > XLSX/base64 transport",
+      "problem": "The repository uses one SAR_MAX_UPLOAD_BYTES value both as Flask MAX_CONTENT_LENGTH and as the decoded upload limit. A 5,000,000-byte file encoded in JSON is about 6,732,204 bytes, so the proposed maximum valid base64 upload is rejected before JSON parsing unless separate wire and decoded limits are defined.",
+      "fix": "Define separate decoded-upload and JSON-wire limits, set the request limit to accommodate the encoded body, enforce decoded limits after base64 decoding and on multipart uploads, and test exact-boundary success/failure without batch creation."
+    },
+    {
+      "id": 2,
+      "severity": "HIGH",
+      "title": "Durable comparison provenance is not transactionally anchored to source reads",
+      "location": "P0-1 > sar_compare_prodrug_pairs",
+      "problem": "The design requires an immutable comparison snapshot but only says that analysis and audit IDs are generated in one transaction. The existing engine reads relationships and latest summaries through separate read connections, so a concurrent source update can make the stored snapshot inconsistent with the source state read for the comparison.",
+      "fix": "Read relationships, endpoint metadata, and summaries and insert the complete snapshot plus audit row in one transaction/snapshot boundary; define SQLite/PostgreSQL conflict behavior and test consistency under a concurrent refresh."
+    },
+    {
+      "id": 3,
+      "severity": "HIGH",
+      "title": "Export audit linkage has no defined field or join",
+      "location": "P0-1 readback/export and P0-3 export provenance",
+      "problem": "The existing analysis_runs table has no audit_event_id column and the export currently selects analysis_runs directly. The design promises audit IDs in the analysis_runs export section without specifying where the ID is stored or how JSON and CSV expose it, so AC-014 can be missed while POST/GET tests pass.",
+      "fix": "Define a concrete audit_event_id field in the stored snapshot/export or a deterministic resource/project/operation join, then specify JSON and CSV keys and add parity and project-isolation tests."
+    },
+    {
+      "id": 4,
+      "severity": "MEDIUM",
+      "title": "Unsaved prodrug preview has the wrong provenance origin",
+      "location": "Shared input-origin contract versus P0-1 prodrug preview response",
+      "problem": "The shared contract assigns uncommitted material to quarantined_import and committed mappings to imported, but the non-persisting prodrug preview is specified as data_origin=imported.",
+      "fix": "Use quarantined_import or define a separate explicit_mapping_preview origin for preview-only rows; reserve imported for saved relationships and test the origin through save, compare, readback, and export."
+    },
+    {
+      "id": 5,
+      "severity": "MEDIUM",
+      "title": "Prodrug comparison selection and pagination semantics are incomplete",
+      "location": "sar_compare_prodrug_pairs schema and response",
+      "problem": "The design does not define omitted versus empty relationship_ids, duplicate IDs, request-order preservation, or a stable order for all-relationship comparisons. POST pages and GET readback can therefore disagree or duplicate/omit pairs.",
+      "fix": "Define omitted as all eligible relationships, reject an explicitly empty or duplicate selection, reject foreign IDs, name a stable order key, return stable_order, snapshot in that order, and test page boundaries and readback."
+    },
+    {
+      "id": 6,
+      "severity": "MEDIUM",
+      "title": "Endpoint-comparison cross-field validation and browser parity are underspecified",
+      "location": "P1-4 sar_compare_endpoints",
+      "problem": "endpoint_b is optional while coverage includes both, but the design does not define missing-B behavior, an explicit no-B value, identical endpoint keys, or exact q matching. The browser currently uses none as a sentinel and matches q case-insensitively against registration_id.",
+      "fix": "Define nullable/none endpoint-B semantics, require B for both, define coverage behavior without B, reject or explicitly allow identical endpoints, specify q normalization/matching, and test invalid combinations plus browser fixture parity."
+    },
+    {
+      "id": 7,
+      "severity": "MEDIUM",
+      "title": "Deep-link query names and browser consumers do not match",
+      "location": "P1-5 deep-link state table",
+      "problem": "The design uses selected_compound_id, but production_explorer.js currently reads selected. production_sar.js currently does not initialize its mode or endpoint from URL query parameters, so sar_mode and relationship/comparison state will not work as specified and existing links may break.",
+      "fix": "Retain existing keys or define dual-read compatibility and one canonical write key; specify SAR initialization precedence and project validation, then test old/new links, foreign IDs, and rendered selections."
+    },
+    {
+      "id": 8,
+      "severity": "MEDIUM",
+      "title": "Prodrug pair-text parsing rules are not a reproducible contract",
+      "location": "sar_preview_prodrug_relationships input description",
+      "problem": "The current parser has specific delimiter, header, extra-column, blank-line, line-number, and case-sensitive token behavior, but the design only says to use an existing CSV/TSV parser. Different implementations could produce different mappings and provenance.",
+      "fix": "Specify a versioned grammar and normalization policy, including delimiters, quoting, header aliases, notes/extra columns, malformed rows, blank lines, source-line numbering, and case sensitivity; use it for preview and save and test those cases."
+    },
+    {
+      "id": 9,
+      "severity": "MEDIUM",
+      "title": "Invalid and non-finite numeric summaries have no safe comparison behavior",
+      "location": "Shared exact subtraction rules and prodrug/endpoint comparison engines",
+      "problem": "The design requires non-null numeric values but does not define conversion or finiteness. The current exactness helper only checks non-null/state/qualifier and comparison calls float directly, allowing exceptions or NaN/infinite deltas instead of a safe non-comparable result.",
+      "fix": "Require finite numeric conversion with no implicit unit conversion; emit invalid_numeric with delta null or a documented 422, never a 500 or complete delta, and test malformed, NaN, infinity, zero, and numeric-string values."
+    },
+    {
+      "id": 10,
+      "severity": "MEDIUM",
+      "title": "Persist=true behavior is ambiguous for the existing browser comparison route",
+      "location": "sar_compare_prodrug_pairs persistence behavior",
+      "problem": "The MCP handler is specified to send persist=true, but the existing browser route is a non-persisting POST and the design does not define the omitted/default persist behavior. Changing the default could create analysis/audit records for every existing browser comparison.",
+      "fix": "Make persist explicit: preserve a false default for the legacy browser call while MCP sends true, or update the browser to send false and reject omission; label ephemeral responses and test exactly one durable run/audit for MCP versus none for browser."
+    },
+    {
+      "id": 11,
+      "severity": "MEDIUM",
+      "title": "The named real XLSX workflow is not a required verification fixture",
+      "location": "P0-2 tests and P2-12 native smoke",
+      "problem": "The design refers generically to an existing XLSX fixture and never requires test/CellLinePanel_pIC50s.xlsx. A synthetic workbook could pass the acceptance tests while the real file fails sheet selection, mapping, source-cell provenance, or the explicit ester/acid workflow.",
+      "fix": "Add a deterministic test using test/CellLinePanel_pIC50s.xlsx that profiles/selects its actual sheet and rows, retrieves all staged pages, commits in a test project, builds summaries, and runs only explicit prodrug mapping/compare with no structure inference."
+    }
+  ],
+  "reviewDoc": "/Users/yipy/Documents/GitHub/SAR_tool/.agents/tasks/mcp-roadmap-design-review.md"
+}

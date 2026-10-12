@@ -6,6 +6,13 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+DEFAULT_MAX_UPLOAD_BYTES = 5_000_000
+JSON_ENVELOPE_BYTES = 65_536
+
+
+def base64_wire_bytes(decoded_bytes: int) -> int:
+    """Maximum JSON body for strict RFC 4648 base64 plus a bounded envelope."""
+    return 4 * ((int(decoded_bytes) + 2) // 3) + JSON_ENVELOPE_BYTES
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -27,6 +34,7 @@ class Settings:
     host: str
     port: int
     secure_cookies: bool
+    max_json_request_bytes: int = 0
     log_sink: str = "stdout"
     log_level: str = "INFO"
     log_retention_days: int = 14
@@ -50,7 +58,11 @@ class Settings:
             upload_dir=upload_dir,
             secret_key=os.environ.get("SAR_SECRET_KEY", ""),
             auth_mode=os.environ.get("SAR_AUTH_MODE", "disabled").strip().lower(),
-            max_upload_bytes=int(os.environ.get("SAR_MAX_UPLOAD_BYTES", "5000000")),
+            max_upload_bytes=int(os.environ.get("SAR_MAX_UPLOAD_BYTES", str(DEFAULT_MAX_UPLOAD_BYTES))),
+            max_json_request_bytes=int(os.environ.get(
+                "SAR_MAX_JSON_REQUEST_BYTES",
+                str(base64_wire_bytes(int(os.environ.get("SAR_MAX_UPLOAD_BYTES", str(DEFAULT_MAX_UPLOAD_BYTES))))),
+            )),
             host=os.environ.get("HOST", "127.0.0.1"),
             port=int(os.environ.get("PORT", "5002")),
             secure_cookies=_env_bool("SAR_SECURE_COOKIES", environment == "production"),
@@ -80,6 +92,8 @@ class Settings:
             errors.append("SAR_AUTH_PASSWORD_HASH must be configured for local production authentication")
         if self.max_upload_bytes <= 0:
             errors.append("SAR_MAX_UPLOAD_BYTES must be positive")
+        if self.max_json_request_bytes and self.max_json_request_bytes < base64_wire_bytes(self.max_upload_bytes):
+            errors.append("SAR_MAX_JSON_REQUEST_BYTES must admit the configured base64 upload boundary")
         if self.log_sink != "stdout" and not Path(self.log_sink).expanduser().is_absolute():
             errors.append("SAR_LOG_SINK must be stdout or an absolute file path")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:

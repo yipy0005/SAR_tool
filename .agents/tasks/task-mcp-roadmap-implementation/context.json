@@ -1,0 +1,15 @@
+{
+  "project_type": "Python 3.12 Flask SAR Workbench with stdlib-only MCP client/server, SQLite/PostgreSQL persistence, RDKit, and vanilla browser JavaScript",
+  "language": "Python, JavaScript, SQL, Markdown",
+  "build_system": "Pixi-pinned runtime; no separate build step. Application routes are in app.py, domain engines are top-level modules, MCP package is sar_mcp/.",
+  "test_framework": "pytest 8.4.1 via Pixi; baseline pixi run test has 200 passing tests; MCP unit/integration baseline has 33 passing tests.",
+  "build_command": "No compile/build command; use pixi run test and the focused pytest selectors.",
+  "test_command": "pixi run test",
+  "verification_instructions": "Run focused selectors after each feature, then pixi run test. Use pixi run mcp-check only against an existing configured loopback app; do not restart it. Do not claim browser/Kiro UI verification unless executed.",
+  "snapshot_or_generated_files": "No generated source snapshots are expected. Tests may create temporary SQLite databases/uploads. Preserve test/CellLinePanel_pIC50s.xlsx and generated CSVs.",
+  "environment_constraints": "Work directly in /Users/yipy/Documents/GitHub/SAR_tool; no worktree, commit, push, reset, or destructive cleanup. Keep read-only/analyze/full modes and browser-only human governance. Do not expose credentials, CSRF/session tokens, raw workbook/base64 bytes, raw pair text, SQL, or untrusted notes.",
+  "contribution_requirements": "README.md, pixi.toml, mcp-roadmap requirements/design/review artifacts are authoritative. Existing database transaction, Flask authorization/CSRF, import quarantine, shaping, and link conventions must be reused. No new dependency is expected.",
+  "key_patterns": "MCP tools are registered through sar_mcp/tools.py and Tool records; tiers are read/analyze/write; SarClient is the only HTTP path; app.py is authorization/transaction boundary; import_formats.py is a dependency-free safe XLSX reader; prodrug_engine.py is explicit project-local mapping source of truth; browser Compare uses endpoint_a/endpoint_b/stage/coverage/q/selected and endpoint_b=none.",
+  "relevant_files": ["app.py", "config.py", "database.py", "import_formats.py", "import_pipeline.py", "prodrug_engine.py", "export_engine.py", "sar_mcp/toolkit.py", "sar_mcp/schema.py", "sar_mcp/server.py", "sar_mcp/client.py", "sar_mcp/config.py", "sar_mcp/cli.py", "sar_mcp/links.py", "sar_mcp/shaping.py", "sar_mcp/tools_lookup.py", "sar_mcp/tools_chem.py", "sar_mcp/tools_run.py", "sar_mcp/tools_open.py", "static/production_explorer.js", "static/production_sar.js", "tests/test_mcp_unit.py", "tests/test_mcp_integration.py", "tests/test_prodrug_relationships.py", "tests/test_import_cleaning.py", "tests/test_export_api.py", "tests/test_deep_links.py", "test/CellLinePanel_pIC50s.xlsx"],
+  "directory_structure": "Top-level Flask app/domain engines and migrations/ contain persistence; sar_mcp/ contains MCP contracts/client/tools; static/ and templates/ contain production UI; tests/ contains pytest suites; .agents/tasks/ contains planning artifacts; test/ contains user-provided workbook and generated data."
+}

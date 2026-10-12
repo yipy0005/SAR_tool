@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import __version__
 from .client import SarClient, SarError
-from .config import DEFAULT_BASE_URL, DEFAULT_CREDENTIALS_FILE, MODES, ConfigError, Settings
+from .config import DEFAULT_BASE_URL, DEFAULT_CREDENTIALS_FILE, MODES, ConfigError, Settings, _origin
 from .server import McpServer
 from .tools import all_tools
 
@@ -31,14 +31,19 @@ def _parser() -> argparse.ArgumentParser:
 
 def kiro_config(mode: str = "analyze", base_url: str = DEFAULT_BASE_URL) -> dict:
     """An mcpServers entry. Secrets are never written here; credentials come from the private file."""
+    try:
+        origin = _origin(base_url, "base_url")
+    except (ConfigError, ValueError) as error:
+        raise ConfigError("base_url must be an origin (scheme, host and port only).") from error
+    safe_base_url = f"{origin.scheme}://{origin.netloc}"
     # Read tools can be approved once; anything that stores or changes data (or writes an audit record) asks each time.
-    quiet = [tool.name for tool in all_tools() if tool.tier == "read" and tool.name != "sar_export_overview"]
+    quiet = [tool.name for tool in all_tools() if tool.tier == "read" and tool.side_effect == "none"]
     return {
         "mcpServers": {
             "sar-workbench": {
                 "command": sys.executable,
                 "args": [str(SCRIPT)],
-                "env": {"SAR_MCP_BASE_URL": base_url, "SAR_MCP_MODE": mode},
+                "env": {"SAR_MCP_BASE_URL": safe_base_url, "SAR_MCP_MODE": mode},
                 "autoApprove": quiet,
                 "disabled": False,
             }
@@ -82,10 +87,20 @@ def save_credentials() -> int:
         print("Nothing saved: line breaks cannot be stored in the credentials file.")
         return 2
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        handle.write(f'SAR_MCP_EMAIL="{email}"\nSAR_MCP_PASSWORD="{password}"\n')
-    os.chmod(target, 0o600)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(f"SAR_MCP_EMAIL={json.dumps(email)}\nSAR_MCP_PASSWORD={json.dumps(password)}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, target)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
     print(f"Saved to {target} (owner-only). Checking the sign-in...")
     return check()
 
@@ -93,7 +108,12 @@ def save_credentials() -> int:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.print_kiro_config:
-        print(json.dumps(kiro_config(args.mode or "analyze", args.base_url or DEFAULT_BASE_URL), indent=2))
+        try:
+            config = kiro_config(args.mode or "analyze", args.base_url or DEFAULT_BASE_URL)
+        except ConfigError as error:
+            print(f"Configuration problem: {error}", file=sys.stderr)
+            return 2
+        print(json.dumps(config, indent=2))
         return 0
     if args.save_credentials:
         return save_credentials()

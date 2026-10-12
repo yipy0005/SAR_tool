@@ -113,20 +113,58 @@ def list_result_summaries(ctx: Context, args: dict) -> dict:
     return linked(data, links_for(ctx).page("summaries", project_id))
 
 
+def compare_endpoints(ctx: Context, args: dict) -> dict:
+    endpoint_b = args.get("endpoint_b", "none")
+    if args.get("coverage", "all") == "both" and endpoint_b == "none":
+        raise ToolError("coverage=both requires endpoint_b")
+    if endpoint_b != "none" and args["endpoint_a"].casefold() == endpoint_b.casefold():
+        raise ToolError("endpoint_a and endpoint_b must differ")
+    result = ctx.client.get("/api/v1/endpoint-comparison", project_id=args["project_id"], endpoint_a=args["endpoint_a"], endpoint_b=endpoint_b, coverage=args.get("coverage", "all"), q=args.get("q", ""), limit=args.get("limit", 200), offset=args.get("offset", 0))
+    links = links_for(ctx)
+    return linked(result, links.explore_compare_result(
+        args["project_id"], result, stage="compare", coverage=args.get("coverage", "all"), q=args.get("q", ""),
+    ))
+
+
 def export_overview(ctx: Context, args: dict) -> dict:
     bundle = ctx.client.get(f"/api/v1/exports/project/{seg(args['project_id'])}", format="json")
     section = args.get("section")
     download = links_for(ctx).export_csv(args["project_id"])
+    handoff = {
+        "download_link": download,
+        "export_id": bundle.get("export_id"),
+        "created_at": bundle.get("created_at"),
+        "row_count": bundle.get("row_count"),
+        "provenance_policy": bundle.get("provenance_policy"),
+        "download_note": "Opening download_link in a browser signed in to the workbench downloads a CSV and records another export in the audit trail.",
+        "audit_side_effect": "CSV download records a project_export audit event; this overview response does not download the CSV.",
+    }
     if not section:
         counts = {k: (len(v) if isinstance(v, list) else None) for k, v in bundle.items() if isinstance(v, list)}
-        return {"download_link": download, "export_id": bundle.get("export_id"), "created_at": bundle.get("created_at"),
-                "row_count": bundle.get("row_count"), "sections": counts, "provenance_policy": bundle.get("provenance_policy"),
-                "download_note": "Opening download_link in a browser signed in to the workbench downloads a CSV and records another export in the audit trail."}
+        return {
+            **handoff,
+            "sections": counts,
+            "offset": 0,
+            "returned": 0,
+            "has_more": False,
+            "next_offset": None,
+            "pagination_note": "No section rows were requested; provide section and limit to page a bounded section.",
+        }
     if section not in bundle or not isinstance(bundle[section], list):
         raise ToolError(f"Unknown section '{section}'. Call without a section to list them.")
     rows = bundle[section]
     limit = args.get("limit", 50)
-    return {"section": section, "total": len(rows), "returned": min(len(rows), limit), "rows": rows[:limit]}
+    returned = min(len(rows), limit)
+    return {
+        **handoff,
+        "section": section,
+        "total": len(rows),
+        "offset": 0,
+        "returned": returned,
+        "has_more": returned < len(rows),
+        "next_offset": returned if returned < len(rows) else None,
+        "rows": rows[:returned],
+    }
 
 
 _P = {"project_id": PROJECT_ID}
@@ -160,8 +198,10 @@ TOOLS = [
          {**_P, "endpoint_key": ENDPOINT_KEY, "compound": COMPOUND_REF,
           "latest_only": {"type": "boolean", "description": "Only the newest summary per compound and endpoint (default true)."},
           "limit": limit_property(300, 2000)}, ("project_id",)),
+    Tool("sar_compare_endpoints", "Compare endpoint summaries", "Read a project-scoped, paginated endpoint comparison matching the browser Compare coverage/search rules. Units and non-exact states remain explicit; no records are stored.", compare_endpoints,
+         {**_P, "endpoint_a": ENDPOINT_KEY, "endpoint_b": {"type": "string", "minLength": 1, "maxLength": 200}, "coverage": {"type": "string", "enum": ["all", "endpoint-a", "both", "review"]}, "q": {"type": "string", "maxLength": 200}, "limit": limit_property(200, 200), "offset": {"type": "integer", "minimum": 0, "maximum": 1000000}}, ("project_id", "endpoint_a"), side_effect="none"),
     Tool("sar_export_overview", "Project export overview",
          "Section sizes of the project's evidence export, or the first rows of one section (for example 'claims' or 'analysis_runs'). The export is recorded in the app's audit trail.",
          export_overview,
-         {**_P, "section": {"type": "string", "maxLength": 60}, "limit": limit_property(50, 500)}, ("project_id",)),
+         {**_P, "section": {"type": "string", "maxLength": 60}, "limit": limit_property(50, 500)}, ("project_id",), side_effect="audit"),
 ]

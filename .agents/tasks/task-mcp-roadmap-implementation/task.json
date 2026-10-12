@@ -1,0 +1,7 @@
+{
+  "task_id": "task-mcp-roadmap-implementation",
+  "task_description": "Implement the complete SAR Workbench MCP coverage roadmap for explicit imports, prodrug mappings/comparisons, endpoint comparison, provenance, links, hardening, and native smoke coverage.",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005", "FEAT-006", "FEAT-007", "FEAT-008"],
+  "blocked_reason": null
+}

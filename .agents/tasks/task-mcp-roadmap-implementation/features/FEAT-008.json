@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-008",
+  "type": "docs",
+  "description": "Update MCP documentation and add deterministic catalog/config/credential/mode/proxy drift checks for the completed roadmap.",
+  "status": "pending",
+  "steps": [
+    "Update README.md, docs/MCP_GUIDE.md, docs/kiro-mcp.example.json, and affected MCP docs for schema 22, current catalog fingerprint/counts, exact modes, import/XLSX/staged review, explicit prodrug/no-inference/durable comparison rules, provenance/origins, pagination/truncation, allowlists, credentials, reconnect, proxy links, and browser-only governance.",
+    "Make documentation-facing counts derive from or be checked against sar_mcp.catalog and reject stale unsupported browser/Kiro verification claims.",
+    "Add native config smoke for absolute paths, secret-free generated mcp.json, side-effect-safe autoApprove, mode visibility only after reconnect, sar_status mode reporting, base-origin API calls versus public-origin links, and credential round-trip/error secrecy."
+  ],
+  "acceptance_criteria": [
+    "Documentation accurately describes all P0/P1/P2 coverage and the remaining browser/runtime limitations.",
+    "Catalog/schema/test/documentation drift fails deterministically and the selected three-mode model remains explicit.",
+    "Kiro config and proxy smoke passes without an external service and auto-approves only genuinely safe read tools."
+  ],
+  "verification": ["pixi run python -m pytest -q tests/test_mcp_catalog.py tests/test_mcp_unit.py tests/test_mcp_native_smoke.py", "pixi run test"],
+  "blocked_reason": null,
+  "findings": "Implements AC-027 through AC-032 and closes the roadmap’s documentation/configuration hardening gaps."
+}

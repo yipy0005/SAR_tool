@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app import create_app
+from database import transaction
 
 
 def _app(tmp_path):
@@ -74,11 +75,116 @@ def test_bulk_relationship_preview_save_and_compare_all_pairs(tmp_path):
     assert payload["pair_count"] == 2
     assert payload["complete_count"] == 2
     assert payload["algorithm_version"] == "prodrug-active-pair-compare-v1"
+    assert payload["endpoint_metadata"]["endpoint_key"] == "IC50:import-v1"
+    assert all(pair["relationship_data_origin"] == "imported" for pair in payload["pairs"])
     assert all(pair["comparison"]["status"] == "complete" for pair in payload["pairs"])
     assert all(pair["comparison"]["delta"] is not None for pair in payload["pairs"])
 
 
-def test_bulk_relationship_preview_flags_duplicates_and_unknown_compounds(tmp_path):
+def test_comparison_rejects_foreign_relationship_selection_without_persistence(tmp_path):
+    client = _app(tmp_path).test_client()
+    project_id = _seed_project(client)
+    saved = client.post(
+        "/api/v1/compound-relationships",
+        json={"project_id": project_id, "pair_text": "PRO-001,ACT-001"},
+    )
+    assert saved.status_code == 201
+    before = client.application.config["DATABASE_PATH"]
+    with transaction(before) as connection:
+        counts_before = connection.execute("SELECT (SELECT count(*) FROM analysis_runs), (SELECT count(*) FROM audit_events)").fetchone()
+    for persist in (False, True):
+        response = client.post(
+            "/api/v1/analysis/prodrug-comparison",
+            json={"project_id": project_id, "endpoint_key": "IC50:import-v1", "relationship_ids": ["foreign_relationship"], "persist": persist},
+        )
+        assert response.status_code == 422
+        assert response.get_json()["error"] == "invalid_relationship_selection"
+    with transaction(before) as connection:
+        counts_after = connection.execute("SELECT (SELECT count(*) FROM analysis_runs), (SELECT count(*) FROM audit_events)").fetchone()
+    assert tuple(counts_before) == tuple(counts_after)
+
+
+def test_relationship_save_errors_omit_untrusted_notes(tmp_path):
+    client = _app(tmp_path).test_client()
+    project_id = _seed_project(client)
+    response = client.post(
+        "/api/v1/compound-relationships",
+        json={
+            "project_id": project_id,
+            "pair_text": "PRO-001,ACT-001,keep this note in preview\nUNKNOWN,ACT-001,do not echo this note",
+        },
+    )
+    assert response.status_code == 422
+    body = response.get_json()
+    serialized = response.get_data(as_text=True)
+    assert "keep this note in preview" not in serialized
+    assert "do not echo this note" not in serialized
+    assert body["details"]["invalid_count"] == 1
+    assert body["details"]["invalid_rows"][0]["error_codes"] == ["unknown_compound"]
+    assert "notes" not in body["details"]
+
+
+def test_durable_comparison_requires_editor_and_marks_invalid_numeric(tmp_path, monkeypatch):
+    import app as app_module
+
+    client = _app(tmp_path).test_client()
+    project_id = _seed_project(client)
+    saved = client.post(
+        "/api/v1/compound-relationships",
+        json={"project_id": project_id, "pair_text": "PRO-001,ACT-001"},
+    )
+    assert saved.status_code == 201
+    monkeypatch.setattr(app_module, "_project_access", lambda _app, _project_id, minimum_role: minimum_role == "viewer")
+    forbidden = client.post(
+        "/api/v1/analysis/prodrug-comparison",
+        json={"project_id": project_id, "endpoint_key": "IC50:import-v1", "persist": True},
+    )
+    assert forbidden.status_code == 403
+    for summary_state, raw_value in (("observed", "NaN"), ("censored", "Infinity"), ("missing", "-Infinity")):
+        with transaction(client.application.config["DATABASE_PATH"]) as connection:
+            connection.execute("UPDATE measurement_summaries SET summary_state = ?, summary_value = ? WHERE compound_id IN (SELECT id FROM compounds WHERE project_id = ? AND registration_id = 'PRO-001')", (summary_state, raw_value, project_id))
+        compared = client.post(
+            "/api/v1/analysis/prodrug-comparison",
+            json={"project_id": project_id, "endpoint_key": "IC50:import-v1"},
+        )
+        assert compared.status_code == 201
+        pair = compared.get_json()["pairs"][0]
+        assert pair["comparison"]["status"] == "invalid_numeric"
+        assert pair["comparison"]["delta"] is None
+    with transaction(client.application.config["DATABASE_PATH"]) as connection:
+        connection.execute("UPDATE measurement_summaries SET summary_state = 'observed', summary_value = '-1e308' WHERE compound_id IN (SELECT id FROM compounds WHERE project_id = ? AND registration_id = 'PRO-001')", (project_id,))
+        connection.execute("UPDATE measurement_summaries SET summary_value = '1e308' WHERE compound_id IN (SELECT id FROM compounds WHERE project_id = ? AND registration_id = 'ACT-001')", (project_id,))
+    overflow = client.post(
+        "/api/v1/analysis/prodrug-comparison",
+        json={"project_id": project_id, "endpoint_key": "IC50:import-v1"},
+    )
+    assert overflow.status_code == 201
+    overflow_pair = overflow.get_json()["pairs"][0]
+    assert overflow_pair["comparison"]["status"] == "invalid_numeric" and overflow_pair["comparison"]["delta"] is None
+    import json
+    json.dumps(overflow.get_json(), allow_nan=False)
+
+
+
+def test_missing_summary_qualifier_is_not_exact(tmp_path):
+    client = _app(tmp_path).test_client()
+    project_id = _seed_project(client)
+    saved = client.post(
+        "/api/v1/compound-relationships",
+        json={"project_id": project_id, "pair_text": "PRO-001,ACT-001"},
+    )
+    assert saved.status_code == 201
+    with transaction(client.application.config["DATABASE_PATH"]) as connection:
+        connection.execute("UPDATE measurement_summaries SET summary_qualifier = NULL WHERE compound_id IN (SELECT id FROM compounds WHERE project_id = ? AND registration_id = 'PRO-001')", (project_id,))
+    response = client.post(
+        "/api/v1/analysis/prodrug-comparison",
+        json={"project_id": project_id, "endpoint_key": "IC50:import-v1"},
+    )
+    assert response.status_code == 201
+    pair = response.get_json()["pairs"][0]
+    assert pair["comparison"]["status"] == "prodrug_non_exact"
+    assert pair["comparison"]["delta"] is None
+
     client = _app(tmp_path).test_client()
     project_id = _seed_project(client)
     preview = client.post(
@@ -96,7 +202,17 @@ def test_bulk_relationship_preview_flags_duplicates_and_unknown_compounds(tmp_pa
     assert any("not found" in error for row in payload["invalid"] for error in row["errors"])
 
 
-def test_relationships_are_project_scoped_and_sar_page_exposes_bulk_mode(tmp_path):
+def test_direct_save_rejects_non_prodrug_relationship_type(tmp_path):
+    client = _app(tmp_path).test_client()
+    project_id = _seed_project(client)
+    response = client.post(
+        "/api/v1/compound-relationships",
+        json={"project_id": project_id, "relationship_type": "related_to", "pair_text": "PRO-001,ACT-001"},
+    )
+    assert response.status_code == 422
+    assert response.get_json()["error"] == "invalid_relationship_type"
+
+
     client = _app(tmp_path).test_client()
     project_id = _seed_project(client)
     other_project = client.post("/api/v1/projects", json={"name": "Other project"}).get_json()["project"]["id"]

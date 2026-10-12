@@ -1,0 +1,22 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Add explicit prodrug mapping preview/save and durable comparison/readback while retaining an ephemeral browser comparison path.",
+  "status": "pending",
+  "steps": [
+    "Version the pair-text grammar and share its parser/normalization between preview and save; validate all rows, preserve source lines/notes, reject inferred relationships, and use quarantined_import for unsaved previews.",
+    "Add MCP preview/save/compare schemas and handlers with analyze/full tiers, exact confirmation, server recomputation, all-or-nothing duplicate/foreign/self validation, stable relationship selection/order/pagination, and imported/derived origins.",
+    "Implement persist=false browser compatibility and persist=true MCP comparison in one SQLite/PostgreSQL transaction that reads relationships, endpoint metadata, and summaries, writes an immutable analysis_runs snapshot plus audit row, and returns concrete audit_event_id linkage; add project-bound GET readback.",
+    "Harden exact numeric comparison to explicit qualifiers, finite numeric conversion, null delta for censored/missing/non-exact/unit-mismatch/invalid_numeric cases, and preserve review/provenance fields."
+  ],
+  "acceptance_criteria": [
+    "Preview accepts exactly one bounded structured pair list or pair_text, reports all validation classes, saves nothing, and uses quarantined_import.",
+    "Save is hidden/refused outside full mode, requires exact true confirmation, recomputes validation, and creates only explicit needs_review relationships.",
+    "Browser comparison creates no durable run; MCP comparison creates exactly one run/audit pair whose snapshot is immutable and project-scoped.",
+    "Missing qualifiers, malformed/NaN/infinite values, thresholds, missing states, and unit mismatches never produce an exact delta or invalid JSON.",
+    "Omitted relationship_ids means all eligible relationships; empty, duplicate, foreign, and out-of-scope selections fail deterministically."
+  ],
+  "verification": ["pixi run python -m pytest -q tests/test_prodrug_relationships.py tests/test_mcp_unit.py tests/test_mcp_integration.py"],
+  "blocked_reason": null,
+  "findings": "Resolves review findings 2, 4, 5, 8, 9, and 10; implements AC-001 through AC-006 and AC-014."
+}

@@ -1,0 +1,10 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    "[confirmed][HIGH] Staged commit is not source-snapshot safe: import_pipeline.py:commit_import() reads the batch and accepted rows before opening its transaction, then only rechecks status and row count. A concurrent staged-row change can leave newly accepted rows uncommitted while the batch is marked committed; reload and validate the batch and rows inside the same transaction, or reject a changed snapshot with 409 before marking it committed.",
+    "[confirmed][MEDIUM] Endpoint comparison link loses endpoint state: sar_mcp/tools_lookup.py:compare_endpoints() puts raw compatibility keys such as IC50:import-v1 into endpoint_a/endpoint_b, while static/production_explorer.js selects only summary|<compatibility_key>|<unit> IDs. Convert keys through a shared link builder using returned unit metadata, or return a safe unselected link when a unique unit cannot be determined.",
+    "[confirmed][MEDIUM] Sectioned export omits the documented handoff: sar_mcp/tools_lookup.py:export_overview() returns only section, total, returned, and rows when section is supplied, omitting the safe download link, export/provenance policy, and explicit audit-side-effect handoff required by FR-P0-3. Include those fields in both branches and announce whether more rows remain.",
+    "[confirmed][MEDIUM] Required acceptance evidence is incomplete: the changed tests exercise direct R-group/activity-cliff API readback but do not exercise sar_get_analysis_run for those two new MCP readback routes, and README/MCP_GUIDE.md do not state a checked current total test count. Add MCP readback integration coverage and a generated/checkable test-count marker to satisfy AC-021, AC-024, and AC-027."
+  ],
+  "reviewDoc": "/Users/yipy/Documents/GitHub/SAR_tool/.agents/tasks/mcp-roadmap-impl-review.md"
+}

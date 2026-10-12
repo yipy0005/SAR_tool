@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Make project exports relationship-complete and expose durable comparison provenance consistently in JSON, CSV, MCP sections, and audit metadata.",
+  "status": "pending",
+  "steps": [
+    "Extend export_project_csv to emit every compound_relationship with relationship/source/review/notes/context/evidence/provenance fields and include durable comparison audit linkage in analysis_run metadata.",
+    "Keep JSON/CSV project filtering and relationship/provenance semantics equivalent, preserve formula-injection safety and bounded export behavior, and make sar_export_overview explicitly disclose its audit side effect.",
+    "Add parity, project-isolation, audit-link, and MCP descriptor/integration tests without weakening browser-only governance."
+  ],
+  "acceptance_criteria": [
+    "JSON and CSV exports contain equivalent relationship IDs, project scope, explicit pair references, review/source fields, notes, context, evidence, and data_origin.",
+    "Durable comparison export records expose analysis_run_id and audit_event_id with algorithm, endpoint, relationship, summary, source measurement, and evidence-boundary provenance.",
+    "Foreign project relationship or audit rows cannot appear in an export or MCP section result, and export audit writes are accurately described."
+  ],
+  "verification": ["pixi run python -m pytest -q tests/test_export_api.py tests/test_mcp_unit.py tests/test_mcp_integration.py"],
+  "blocked_reason": null,
+  "findings": "Resolves review finding 3 and implements AC-013, AC-014, and AC-022."
+}

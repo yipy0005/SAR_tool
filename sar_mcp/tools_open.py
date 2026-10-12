@@ -14,11 +14,14 @@ FORMATS = ["auto", "smiles", "smarts"]
 def _assay_id(ctx: Context, project_id: str, key: str) -> str:
     """The Compare page names an assay 'summary|<endpoint key>|<unit>'."""
     summaries = latest_summaries(ctx.client.get("/api/v1/measurement-summaries", project_id=project_id).get("summaries") or [])
-    units = {item.get("compatibility_key"): item.get("canonical_unit") or "" for item in summaries}
-    if key not in units:
-        known = ", ".join(sorted(str(name) for name in units)) or "none yet (run measurement_summaries first)"
+    units = sorted({item.get("canonical_unit") or "" for item in summaries if item.get("compatibility_key") == key})
+    if not units:
+        known = ", ".join(sorted({str(item.get("compatibility_key")) for item in summaries})) or "none yet (run measurement_summaries first)"
         raise ToolError(f"No result summaries for '{key}' in this project. Known endpoints: {known}.")
-    return f"summary|{key}|{units[key]}"
+    endpoint_id = links_for(ctx).compare_endpoint_id(key, units[0] if len(units) == 1 else None)
+    if endpoint_id is None:
+        raise ToolError(f"Endpoint '{key}' does not have one unique canonical unit in this project.")
+    return endpoint_id
 
 
 def open_in_workbench(ctx: Context, args: dict) -> dict:

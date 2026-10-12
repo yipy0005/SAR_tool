@@ -1,6 +1,6 @@
 # Use the SAR Workbench from an LLM (MCP)
 
-The MCP server lets an assistant such as Kiro look up compounds, read results, run searches and start analyses in the web app. It signs in to the app the way you do, so project membership, CSRF protection and the audit trail all still apply. It uses only the Python standard library, so it adds no dependencies.
+The checked MCP contract is schema 22; the registered catalog derives the mode counts rather than relying on prose. The pinned descriptor fingerprint is `109a86ce9b7ab797d24c45f0d6c7b5b2f37f91e5ca016f588ea82e94a614174b`. It signs in to the app the way you do, so project membership, CSRF protection and the audit trail all still apply. It uses only the Python standard library, so it adds no dependencies.
 
 ## Set up (once)
 
@@ -17,9 +17,9 @@ Set `SAR_MCP_MODE` in the `env` block of `mcp.json`. Tools outside the mode are 
 
 | Mode | Adds | Tools |
 | --- | --- | --- |
-| `read-only` | Nothing is stored (exports write an audit record) | 16 |
-| `analyze` (default) | Stores derived analysis runs and prediction models | 19 |
-| `full` | Creates projects and imports measurements | 22 |
+| `read-only` | Nothing is stored (exports write an audit record) | 17 |
+| `analyze` (default) | Stores derived analysis runs and durable explicit prodrug comparisons | 22 |
+| `full` | Creates projects, stages/commits imports, and saves explicit mappings | 28 |
 
 Kiro asks before each call except the read tools listed in `autoApprove`. `sar_export_overview` is not auto-approved because each export writes an audit record. Keep stored-result and write tools out of `autoApprove`, so you see each one before it runs.
 
@@ -45,14 +45,20 @@ A stored analysis run is visible in the web app. The Find patterns page shows th
 | `sar_open_in_workbench` | read | A link that opens a chosen page of the web app, optionally pinned to a compound, a stored run, a search or two assays |
 | `sar_list_records` | read | Saved series, claims, recommendations, designs, models, relationships |
 | `sar_get_analysis_run` | read | Read back a stored analysis run |
+| `sar_compare_endpoints` | read | Paginated browser-parity endpoint comparison |
 | `sar_run_analysis` | analyze | Measurement summaries, properties, MMP, R-group, pharmacophore R-group, activity cliffs, selectivity, cellular translation, ADME, Pareto, contradictions, information gap, recommendations |
+| `sar_preview_prodrug_relationships` | analyze | Validate explicit project-scoped prodrug/active mappings; saves nothing |
+| `sar_compare_prodrug_pairs` | analyze | Persist a derived comparison snapshot with relationship, summary, source-measurement and audit provenance |
 | `sar_train_prediction_model` | analyze | Train a model; the app applies its fixed qualification thresholds |
 | `sar_predict_compounds` | analyze | Predict with a stored model; blocked and out-of-domain rows are returned as such |
-| `sar_create_project` | write | Create an empty project |
-| `sar_import_preview` | write | Check CSV text without saving results |
-| `sar_import_commit` | write | Save a previewed import; needs `user_confirmed=true` |
+| `sar_create_project` | write | Create an empty project (disabled before HTTP when an allowlist is configured) |
+| `sar_import_profile` | write | Profile CSV/TSV/XLSX metadata without creating a batch |
+| `sar_import_preview` | write | Stage a paginated CSV/TSV/XLSX quarantine preview with source cells and formula policy |
+| `sar_get_import_preview` | write | Read every staged row through project-bound pages |
+| `sar_import_commit` | write | Commit a previewed import after complete paginated review and confirmation |
+| `sar_save_prodrug_relationships` | write | Save explicit mappings with `needs_review` status; no inference |
 
-## Links to the web app
+Preview-only uploads and pair mappings are labelled `quarantined_import`; committed measurements and explicit relationships are `imported`; summaries, endpoint comparisons and durable prodrug comparison snapshots are `derived`. Paged responses carry total/offset/returned/has-more metadata and stable-order keys. Pair text uses the versioned `prodrug-pairs-v1` grammar shared by preview and save. The real-workbook native smoke path exercises `test/CellLinePanel_pIC50s.xlsx`, maps `Sample_ID` and `SMILES`, and never uses `WuXi_ID_core` or chemical inference.
 
 Most results start with a `web_link` that opens the matching page of the web app in your browser, so you can look at the output there. Other results add `related_links`, and `sar_open_in_workbench` builds a link on request ("show me this compound in the pattern explorer").
 
@@ -67,7 +73,7 @@ Most results start with a `web_link` that opens the matching page of the web app
 | `sar_list_projects`, `sar_search_compounds`, `sar_create_project` | Start (the SAR table) |
 | `sar_export_overview` | `download_link`: a CSV download |
 
-Opening a link uses your own browser sign-in, so what you can see follows your project membership, and a link to one project does not reveal another. Links contain only project, compound and run ids and search text, never a token or password. The address in a link is `SAR_MCP_BASE_URL`, or `SAR_MCP_PUBLIC_URL` when your browser reaches the app at a different address (for example through a proxy).
+Opening a link uses your own browser sign-in, so what you can see follows your project membership, and a link to one project does not reveal another. Safe links are project-scoped and bounded: they may contain `project_id`; existing `run`, `find`, and `find_format`; staged-import `import_id` with `stage=import_review`; SAR `sar_mode=prodrug`, `endpoint_key`, `relationship_id`, and `comparison_run_id`; evidence `compound_id`, `measurement_id`, and `summary_id`; or Compare `endpoint_a`, `endpoint_b`, `stage`, `coverage`, `q`, and `selected`. Compare reads both the legacy `selected` key and the compatibility alias `selected_compound_id`, then writes canonical `selected`. Browser consumers validate referenced IDs against the requested project and render a safe empty/not-found marker for malformed or foreign state; they do not fall back across projects. Links never contain credentials, CSRF/session values, raw pair text, or workbook bytes. The address in a link is `SAR_MCP_PUBLIC_URL` when configured for a browser/proxy origin, while MCP API calls continue to use `SAR_MCP_BASE_URL`.
 
 A link to a stored run shows a notice at the top of the page naming the run, when it was made, and whether a newer one exists. Everything else on the page remains the latest result. If the run does not exist in that project the page says so and shows the latest results. The web app's URL parameters are described in [`WEB_APP_GUIDE.md`](WEB_APP_GUIDE.md).
 
@@ -113,6 +119,6 @@ The assistant can still read all of these records. Deleting or overwriting data 
 - **A tool returns 403**: your account lacks the needed role on that project. Analyses need editor access.
 - **No endpoints listed**: run `sar_run_analysis` with `analysis=measurement_summaries` first.
 
-## Tests
-
-`pixi run test` includes `tests/test_mcp_unit.py` and `tests/test_mcp_integration.py`. The integration tests start a real production-mode app and drive it through sign-in, CSRF, an import, analyses and searches, and run the real entry point over stdin and stdout.
+The deterministic native fallback does not claim browser or Kiro UI/E2E verification; it covers Flask routes, static URL-state markers, project scoping, and the real workbook journey. Browser-only governance actions remain unavailable through MCP.
+<!-- sar-workbench-test-count: 224 -->
+`pixi run test` includes the checked current suite total (224 tests), including `tests/test_mcp_unit.py` and `tests/test_mcp_integration.py`. The integration tests start a real production-mode app and drive it through sign-in, CSRF, an import, analyses and searches, and run the real entry point over stdin and stdout.

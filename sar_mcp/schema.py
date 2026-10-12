@@ -25,6 +25,10 @@ ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
 def validate(value: Any, schema: dict, path: str = "arguments") -> list[str]:
     """Return a list of human-readable problems; empty means valid."""
     problems: list[str] = []
+    if "oneOf" in schema:
+        matches = sum(not validate(value, option, path) for option in schema["oneOf"])
+        if matches != 1:
+            problems.append(f"{path} must match exactly one allowed form")
     expected = schema.get("type")
     if expected and not _TYPES[expected](value):
         return [f"{path} must be {'an' if expected in {'integer', 'object', 'array'} else 'a'} {expected}"]
@@ -48,7 +52,7 @@ def validate(value: Any, schema: dict, path: str = "arguments") -> list[str]:
         if len(value) > schema.get("maxItems", 1 << 30):
             problems.append(f"{path} has too many items (maximum {schema['maxItems']})")
         if "items" in schema:
-            for index, item in enumerate(value[:200]):
+            for index, item in enumerate(value):
                 problems.extend(validate(item, schema["items"], f"{path}[{index}]"))
     if isinstance(value, dict):
         properties = schema.get("properties", {})

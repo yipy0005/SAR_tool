@@ -97,6 +97,11 @@ def test_rgroup_activity_cliff_and_design_candidate_apis(production_app):
     assert rgroup_payload["data_origin"] == "derived"
     assert rgroup_payload["analysis_type"] == "rgroup"
     assert any(item["status"] == "assigned" for item in rgroup_payload["assignments"])
+    rgroup_readback = client.get(f"/api/v1/analysis/rgroup/{rgroup_payload['analysis_run_id']}?project_id={project_id}&limit=50")
+    assert rgroup_readback.status_code == 200
+    rgroup_assignment = rgroup_readback.get_json()["assignments"][0]
+    assert "summary_ids" in rgroup_assignment and "source_measurement_ids" in rgroup_assignment
+    assert rgroup_readback.get_json()["evidence_boundary"]
 
     cliffs = client.post(
         "/api/v1/analysis/activity-cliffs",
@@ -107,6 +112,11 @@ def test_rgroup_activity_cliff_and_design_candidate_apis(production_app):
     assert cliff_payload["data_origin"] == "derived"
     assert cliff_payload["cliff_count"] >= 1
     assert cliff_payload["cliffs"][0]["evidence_status"] == "eligible_observed_summary"
+    cliff_readback = client.get(f"/api/v1/analysis/activity-cliffs/{cliffs.get_json()['analysis_run_id']}?project_id={project_id}&limit=50")
+    assert cliff_readback.status_code == 200
+    cliff = cliff_readback.get_json()["cliffs"][0]
+    assert cliff["summary_ids"] and "source_measurement_ids" in cliff
+    assert cliff_readback.get_json()["evidence_boundary"]
 
     candidate = {
         "category": "exploit",

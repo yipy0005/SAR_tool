@@ -207,6 +207,27 @@ def build_project_export(
         item["data_origin"] = "derived"
     for item in analyses:
         item["input_selection"] = _json_value(item.pop("input_selection_json", None), {})
+        item["analysis_run_id"] = item.get("id")
+        if item.get("analysis_type") == "prodrug_comparison":
+            item["audit_event_id"] = item["input_selection"].get("audit_event_id")
+            item["endpoint_metadata"] = item["input_selection"].get("endpoint_metadata")
+            item["endpoint_key"] = item["input_selection"].get("endpoint_key")
+            pairs = item["input_selection"].get("pairs", [])
+            item["relationship_ids"] = [pair.get("id") for pair in pairs]
+            item["summary_ids"] = [
+                result.get("summary_id")
+                for pair in pairs
+                for result in (pair.get("prodrug", {}).get("result", {}), pair.get("active", {}).get("result", {}))
+                if result.get("summary_id")
+            ]
+            item["source_measurement_ids"] = sorted({
+                source_id
+                for pair in pairs
+                for result in (pair.get("prodrug", {}).get("result", {}), pair.get("active", {}).get("result", {}))
+                for source_id in result.get("source_measurement_ids", [])
+            })
+            item["evidence_boundary"] = item["input_selection"].get("evidence_boundary")
+            item["relationship_data_origin"] = "imported"
         item["data_origin"] = "derived"
     for item in pharmacophore_rgroup:
         item["match_atoms"] = _json_value(item.pop("match_atoms_json", None), [])
@@ -344,12 +365,14 @@ def export_project_csv(bundle: dict[str, Any]) -> str:
         write_record("claim", item)
     for item in bundle["curated_designs"]:
         write_record("curated_design", item)
+    for item in bundle["generated_recommendations"]:
+        write_record("generated_recommendation", item)
     for item in bundle["series"]:
         write_record("series", item)
     for item in bundle["series_versions"]:
         write_record("series_version", item)
     for item in bundle["series_memberships"]:
         write_record("series_membership", item)
-    for item in bundle["generated_recommendations"]:
-        write_record("generated_recommendation", item)
+    for item in bundle["compound_relationships"]:
+        write_record("compound_relationship", item)
     return output.getvalue()

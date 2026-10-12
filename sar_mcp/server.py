@@ -106,13 +106,28 @@ class McpServer:
             raise _ProtocolError(ERR_PARAMS, f"Unknown tool: {name}")
         started = time.monotonic()
         try:
+            if name == "sar_import_commit" and arguments.get("user_confirmed") is not True:
+                return self._failure("Not committed. user_confirmed must be exactly true after reviewing the complete preview.")
             problems = validate(arguments, tool.input_schema())
+            if name in {"sar_import_profile", "sar_import_preview"}:
+                content_fields = [key for key in ("csv_text", "content_base64") if key in arguments]
+                if len(content_fields) != 1:
+                    problems.append("arguments must contain exactly one of csv_text or content_base64")
+            if name in {"sar_preview_prodrug_relationships", "sar_save_prodrug_relationships"}:
+                mapping_fields = [key for key in ("pairs", "pair_text") if key in arguments]
+                if name == "sar_preview_prodrug_relationships" and "continuation_token" in arguments:
+                    if mapping_fields:
+                        problems.append("continuation_token cannot be combined with pairs or pair_text")
+                elif len(mapping_fields) != 1:
+                    problems.append("arguments must contain exactly one of pairs or pair_text")
             if problems:
                 return self._failure("Invalid arguments: " + "; ".join(problems[:6]))
             allowed = self.settings.project_ids
+            if name == "sar_create_project" and allowed:
+                return self._failure("sar_create_project is disabled when SAR_MCP_PROJECT_IDS is configured; allow the new project explicitly before creating it.")
             if allowed and arguments.get("project_id") is not None and arguments["project_id"] not in allowed:
-                return self._failure("This MCP server is restricted to other projects (SAR_MCP_PROJECT_IDS). Use sar_list_projects.")
-            return self._success(tool.handler(self.ctx, arguments))
+                return self._failure("This MCP server is not allowed to use the requested project; access is restricted by SAR_MCP_PROJECT_IDS. Use sar_list_projects.")
+            return self._success(name, arguments, tool.handler(self.ctx, arguments))
         except SarApiError as error:
             return self._failure(str(error) + _hint(error))
         except (ToolError, SarAuthError, SarConnectionError) as error:
@@ -127,15 +142,83 @@ class McpServer:
     def _failure(text: str) -> dict:
         return {"content": [{"type": "text", "text": text}], "isError": True}
 
-    def _success(self, data: Any) -> dict:
+    def _success(self, tool_name: str, arguments: dict, data: Any) -> dict:
         budget = self.settings.max_chars
-        cleaned, cuts = fit(strip_drawings(data), budget - 700)
+        original = strip_drawings(data)
+        cleaned, cuts = fit(original, max(512, budget - 900))
         if cuts:
             notice = {"note": "Lists were shortened to fit the size limit. Narrow the request (filters, limit, offset) to see the rest.", "lists": cuts}
+            if isinstance(cleaned, dict) and isinstance(original, dict):
+                # Handlers calculate pagination before the generic response budget is known. If
+                # fitting removes page rows, repair the page contract and give the caller a
+                # concrete readback continuation instead of stale returned/next_offset values.
+                page_keys = [key for key in ("rows", "pairs") if isinstance(original.get(key), list)]
+                if not page_keys and any(key in original for key in ("valid", "invalid")):
+                    page_keys = [key for key in ("valid", "invalid") if isinstance(original.get(key), list)]
+                cut_keys = {tuple(note.get("path", []))[0] for note in cuts if note.get("path")}
+                selected = [key for key in page_keys if key in cut_keys]
+                if selected and "returned" in original:
+                    shown = sum(len(cleaned.get(key) or []) for key in page_keys)
+                    prior_returned = int(original.get("returned") or 0)
+                    if shown < prior_returned:
+                        # A prodrug preview with no domain continuation cannot be resumed after
+                        # generic fitting because the raw mapping is intentionally never copied
+                        # into a continuation. Return a truthful, actionable size error instead.
+                        existing_continuation = cleaned.get("continuation")
+                        existing_arguments = existing_continuation.get("arguments") if isinstance(existing_continuation, dict) else None
+                        if tool_name == "sar_preview_prodrug_relationships" and not (
+                            isinstance(existing_arguments, dict) and existing_arguments.get("continuation_token")
+                        ):
+                            return self._failure(json.dumps({
+                                "error": "response_too_large",
+                                "tool": tool_name,
+                                "message": "Reduce the prodrug preview limit or notes so the page fits; no safe continuation is available for this unsaved mapping.",
+                            }, separators=(",", ":")))
+                        offset = int(original.get("offset") or 0)
+                        cleaned["returned"] = shown
+                        cleaned["has_more"] = True
+                        cleaned["next_offset"] = offset + shown
+                        continuation = cleaned.get("continuation")
+                        if not isinstance(continuation, dict):
+                            continuation = {"tool": tool_name, "arguments": {}}
+                        continuation_args = dict(continuation.get("arguments") or {})
+                        continuation_tool = continuation.get("tool") or tool_name
+                        # Seed generic continuations with only the bounded request state needed
+                        # to invoke the same read again. Upload bytes and raw pair mappings never
+                        # enter a continuation; staged previews resume from their persisted batch.
+                        if tool_name == "sar_import_preview" and original.get("import_id"):
+                            continuation_tool = "sar_get_import_preview"
+                            continuation_args = {
+                                "project_id": arguments.get("project_id"),
+                                "import_id": original["import_id"],
+                            }
+                        else:
+                            for safe_field in (
+                                "project_id", "endpoint_a", "endpoint_b", "coverage", "q",
+                                "filename", "sheet_name", "header_row", "data_start_row",
+                                "mapping_overrides", "formula_acknowledged", "import_id",
+                                "relationship_type", "continuation_token",
+                            ):
+                                if safe_field in arguments:
+                                    continuation_args.setdefault(safe_field, arguments[safe_field])
+                        continuation_args.update({"offset": offset + shown})
+                        if "limit" in arguments:
+                            continuation_args["limit"] = arguments["limit"]
+                        # Never manufacture a continuation containing uploaded bytes or raw pair text.
+                        for secret_field in ("content_base64", "csv_text", "pair_text", "pairs"):
+                            continuation_args.pop(secret_field, None)
+                        continuation["tool"] = continuation_tool
+                        continuation["arguments"] = {key: value for key, value in continuation_args.items() if value is not None}
+                        cleaned["continuation"] = continuation
+                        notice["continuation"] = continuation
             cleaned = {**cleaned, "_truncated": notice} if isinstance(cleaned, dict) else {"result": cleaned, "_truncated": notice}
         text = json.dumps(cleaned, ensure_ascii=False, separators=(",", ":"), default=str)
         if len(text) > budget:
-            text = text[:budget] + f" ...[output cut at {budget} characters]"
+            return self._failure(json.dumps({
+                "error": "response_too_large",
+                "tool": tool_name,
+                "message": f"Reduce requested fields or page size for {tool_name}; the response cannot fit the MCP output budget.",
+            }, separators=(",", ":")))
         return {"content": [{"type": "text", "text": text}], "isError": False}
 
     # -- stdio loop -------------------------------------------------------------------------

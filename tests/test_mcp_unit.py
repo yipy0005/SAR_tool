@@ -1,15 +1,20 @@
 """MCP server: protocol, schema validation, output shaping, settings and permission tiers (no web app)."""
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
+from app import create_app
+from config import base64_wire_bytes
+from sar_mcp import cli as mcp_cli
 from sar_mcp.cli import kiro_config
 from sar_mcp.client import SarApiError, _SameOriginRedirects
 from sar_mcp.config import ConfigError, Settings, read_credentials_file
@@ -83,10 +88,10 @@ def test_stdio_loop_survives_bad_lines_and_keeps_stdout_clean():
     server.serve(io.StringIO(lines), out)
     frames = [json.loads(line) for line in out.getvalue().splitlines()]
     assert [frame.get("id") for frame in frames] == [None, 1, 2]
-    assert frames[0]["error"]["code"] == -32700 and len(frames[2]["result"]["tools"]) == 19
+    assert frames[0]["error"]["code"] == -32700 and len(frames[2]["result"]["tools"]) == 22
 
 
-@pytest.mark.parametrize("mode,count", [("read-only", 16), ("analyze", 19), ("full", 22)])
+@pytest.mark.parametrize("mode,count", [("read-only", 17), ("analyze", 22), ("full", 28)])
 def test_modes_show_only_the_permitted_tools(mode, count):
     server = McpServer(settings(SAR_MCP_MODE=mode), FakeClient())
     listed = {tool["name"] for tool in rpc(server, "tools/list")["result"]["tools"]}
@@ -118,7 +123,7 @@ def test_descriptors_are_well_formed():
         assert schema["type"] == "object" and schema["additionalProperties"] is False
         assert set(schema.get("required", [])) <= set(schema["properties"])
         assert len(descriptor["description"]) > 40
-        assert descriptor["annotations"]["readOnlyHint"] is (tool.tier == "read")
+        assert descriptor["annotations"]["readOnlyHint"] is (tool.tier == "read" and tool.side_effect == "none")
         if tool.tier != "read":
             assert descriptor["annotations"]["idempotentHint"] is False
 
@@ -129,6 +134,56 @@ def test_invalid_arguments_come_back_as_tool_errors_the_model_can_fix():
     assert result["isError"] is True
     text = result["content"][0]["text"]
     assert "project_id" in text and "limit" in text and "not an accepted argument" in text
+
+
+def test_import_upload_contract_is_rejected_before_http():
+    fake = FakeClient()
+    server = McpServer(settings(SAR_MCP_MODE="full"), fake)
+    cases = [
+        ("sar_import_preview", {"project_id": "p1", "csv_text": "a,b\n1,2\n"}),
+        ("sar_import_preview", {"project_id": "p1", "filename": "x.csv"}),
+        ("sar_import_preview", {"project_id": "p1", "filename": "x.csv", "csv_text": "a", "content_base64": "YQ=="}),
+        ("sar_import_profile", {"project_id": "p1", "filename": "x.csv"}),
+        ("sar_import_profile", {"project_id": "p1", "filename": "x.csv", "csv_text": "a", "content_base64": "YQ=="}),
+    ]
+    for name, arguments in cases:
+        result = call(server, name, arguments)
+        assert result["isError"] is True
+    assert fake.calls == []
+
+
+def test_prodrug_mapping_contract_rejects_invalid_forms_before_http():
+    fake = FakeClient()
+    server = McpServer(settings(SAR_MCP_MODE="full"), fake)
+    valid_pair = {"prodrug_id": "PRO-001", "active_id": "ACT-001"}
+    cases = [
+        ("sar_preview_prodrug_relationships", {"project_id": "p1", "relationship_type": "prodrug_of"}),
+        ("sar_save_prodrug_relationships", {"project_id": "p1", "relationship_type": "prodrug_of", "user_confirmed": True}),
+        ("sar_preview_prodrug_relationships", {"project_id": "p1", "relationship_type": "prodrug_of", "pairs": [valid_pair], "pair_text": "PRO-001,ACT-001"}),
+        ("sar_save_prodrug_relationships", {"project_id": "p1", "relationship_type": "prodrug_of", "pairs": [valid_pair], "pair_text": "PRO-001,ACT-001", "user_confirmed": True}),
+        ("sar_preview_prodrug_relationships", {"project_id": "p1", "relationship_type": "prodrug_of", "pairs": [{**valid_pair, "unexpected": "x"}]}),
+        ("sar_save_prodrug_relationships", {"project_id": "p1", "relationship_type": "prodrug_of", "pairs": [{**valid_pair, "unexpected": "x"}], "user_confirmed": True}),
+        ("sar_preview_prodrug_relationships", {"project_id": "p1", "relationship_type": "related_to", "pairs": [valid_pair]}),
+        ("sar_save_prodrug_relationships", {"project_id": "p1", "relationship_type": "related_to", "pairs": [valid_pair], "user_confirmed": True}),
+    ]
+    for name, arguments in cases:
+        result = call(server, name, arguments)
+        assert result["isError"] is True
+    late_invalid = [valid_pair] * 200 + [{"prodrug_id": "PRO-001"}]
+    for name, extra in (("sar_preview_prodrug_relationships", {}), ("sar_save_prodrug_relationships", {"user_confirmed": True})):
+        result = call(server, name, {"project_id": "p1", "relationship_type": "prodrug_of", "pairs": late_invalid, **extra})
+        assert result["isError"] is True
+    assert fake.calls == []
+
+
+def test_scalar_overflow_is_parseable_and_has_no_fake_continuation():
+    payload = {"status": "ok", "detail": "x" * 10000}
+    server = McpServer(settings(SAR_MCP_MAX_CHARS="2000"), FakeClient({"/api/v1/readyz": payload}))
+    result = call(server, "sar_status", {})
+    assert result["isError"] is True
+    error = json.loads(result["content"][0]["text"])
+    assert error["error"] == "response_too_large" and error["tool"] == "sar_status"
+    assert "same_tool" not in result["content"][0]["text"]
 
 
 def test_project_allowlist_blocks_other_projects():
@@ -169,8 +224,51 @@ def test_oversized_results_are_cut_and_announced():
     assert len(text) <= 2100 and "_truncated" in text and result["isError"] is False
 
 
-def test_settings_validate_url_mode_and_bounds():
-    assert settings().base_url == "http://127.0.0.1:5001" and settings().mode == "analyze"
+def test_paged_fit_repairs_return_metadata_and_continuation():
+    server = McpServer(settings(SAR_MCP_MAX_CHARS="2000"), FakeClient())
+    data = {"offset": 0, "returned": 200, "total": 200, "has_more": False, "next_offset": None, "rows": [{"id": index, "detail": "x" * 80} for index in range(200)]}
+    result = server._success("sar_compare_endpoints", {"project_id": "p1", "limit": 200}, data)
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["returned"] == len(payload["rows"]) < 200
+    assert payload["has_more"] is True and payload["next_offset"] == payload["returned"]
+    assert payload["continuation"]["arguments"]["offset"] == payload["next_offset"]
+
+
+def test_paged_fit_continuations_retain_safe_request_context():
+    server = McpServer(settings(SAR_MCP_MAX_CHARS="2000"), FakeClient())
+    endpoint_data = {
+        "offset": 0, "returned": 200, "total": 200, "has_more": False, "next_offset": None,
+        "rows": [{"id": index, "detail": "x" * 80} for index in range(200)],
+    }
+    endpoint_result = server._success(
+        "sar_compare_endpoints",
+        {"project_id": "p1", "endpoint_a": "IC50:import-v1", "endpoint_b": "none", "coverage": "all", "q": "MC", "limit": 200},
+        endpoint_data,
+    )
+    endpoint_payload = json.loads(endpoint_result["content"][0]["text"])
+    assert endpoint_payload["continuation"] == {
+        "tool": "sar_compare_endpoints",
+        "arguments": {
+            "project_id": "p1", "endpoint_a": "IC50:import-v1", "endpoint_b": "none",
+            "coverage": "all", "q": "MC", "offset": endpoint_payload["next_offset"], "limit": 200,
+        },
+    }
+
+    import_data = {
+        "import_id": "imp_1", "offset": 0, "returned": 200, "total": 200, "has_more": False, "next_offset": None,
+        "rows": [{"id": index, "detail": "x" * 80} for index in range(200)],
+    }
+    import_result = server._success(
+        "sar_import_preview",
+        {"project_id": "p1", "filename": "measurements.csv", "csv_text": "secret", "limit": 200},
+        import_data,
+    )
+    import_payload = json.loads(import_result["content"][0]["text"])
+    assert import_payload["continuation"] == {
+        "tool": "sar_get_import_preview",
+        "arguments": {"project_id": "p1", "import_id": "imp_1", "offset": import_payload["next_offset"], "limit": 200},
+    }
     assert settings(SAR_MCP_BASE_URL="https://sar.example.org/").base_url == "https://sar.example.org"
     for bad in ("ftp://x", "http://user:pw@127.0.0.1", "http://127.0.0.1/app", "127.0.0.1:5001", "http://127.0.0.1?x=1"):
         with pytest.raises(ConfigError):
@@ -209,6 +307,18 @@ def test_credentials_file_must_be_private(tmp_path):
     assert read_credentials_file(tmp_path / "missing.env") == {}
 
 
+def test_credentials_reader_rejects_decoded_and_physical_line_breaks(tmp_path):
+    path = tmp_path / "newline.env"
+    os.chmod(path, 0o600) if path.exists() else None
+    path.write_text('SAR_MCP_PASSWORD="secret\\nvalue"\n', encoding="utf-8")
+    os.chmod(path, 0o600)
+    with pytest.raises(ConfigError, match="line breaks"):
+        read_credentials_file(path)
+    path.write_text('SAR_MCP_PASSWORD="secret\nvalue"\n', encoding="utf-8")
+    with pytest.raises(ConfigError):
+        read_credentials_file(path)
+
+
 def test_redirects_to_another_origin_are_refused():
     handler = _SameOriginRedirects("http://127.0.0.1:5001")
     request = urllib.request.Request("http://127.0.0.1:5001/login", data=b"x", method="POST")
@@ -229,14 +339,20 @@ def test_analysis_parameters_are_checked_before_anything_is_sent():
     assert fake.calls == []
 
 
-def test_commit_requires_explicit_confirmation():
+def test_commit_requires_explicit_confirmation_and_complete_review_attestation():
     fake = FakeClient()
     server = McpServer(settings(SAR_MCP_MODE="full"), fake)
-    args = {"project_id": "p1", "import_id": "imp_1", "user_confirmed": False}
+    args = {"project_id": "p1", "import_id": "imp_1", "user_confirmed": False, "reviewed_all_rows": True, "reviewed_row_count": 0}
     result = call(server, "sar_import_commit", args)
     assert result["isError"] and "user_confirmed" in result["content"][0]["text"] and fake.calls == []
-    call(server, "sar_import_commit", {**args, "user_confirmed": True})
-    assert fake.calls == [("POST", "/api/v1/imports/imp_1/commit", {"project_id": "p1"})]
+
+    negative_review = call(server, "sar_import_commit", {**args, "user_confirmed": True, "reviewed_all_rows": False})
+    assert negative_review["isError"] and "reviewed_all_rows" in negative_review["content"][0]["text"] and fake.calls == []
+
+    committed = call(server, "sar_import_commit", {**args, "user_confirmed": True})
+    committed_payload = json.loads(committed["content"][0]["text"])
+    assert committed_payload["review_attestation_unverified"] is True
+    assert fake.calls == [("POST", "/api/v1/imports/imp_1/commit", {"project_id": "p1", "mcp_request": True, "user_confirmed": True, "reviewed_all_rows": True, "reviewed_row_count": 0})]
 
 
 def test_kiro_config_has_no_secrets_and_auto_approves_only_read_tools():
@@ -248,6 +364,33 @@ def test_kiro_config_has_no_secrets_and_auto_approves_only_read_tools():
     assert "sar_export_overview" not in approved and not {"sar_run_analysis", "sar_import_commit", "sar_create_project"} & approved
     assert os.path.isabs(entry["command"]) and os.path.isabs(entry["args"][0]) and entry["args"][0].endswith("sar_mcp_server.py")
     assert "password" not in json.dumps(entry).lower()
+
+
+def test_kiro_config_rejects_secret_bearing_or_non_origin_base_urls(capsys):
+    for bad_url in (
+        "https://user:secret@example.test:5001",
+        "https://example.test/workspace",
+        "https://example.test?token=secret",
+        "https://example.test#secret",
+    ):
+        with pytest.raises(ConfigError):
+            kiro_config("analyze", bad_url)
+    assert mcp_cli.main(["--print-kiro-config", "--base-url", "https://user:secret@example.test:5001"]) == 2
+    assert "secret" not in capsys.readouterr().err
+
+
+def test_prodrug_preview_overflow_without_continuation_is_actionable_size_error():
+    server = McpServer(settings(SAR_MCP_MAX_CHARS="2000"), FakeClient())
+    data = {
+        "offset": 0, "returned": 200, "total": 200, "has_more": False, "next_offset": None,
+        "valid": [{"row": index, "notes": "x" * 80} for index in range(200)], "invalid": [],
+    }
+    result = server._success("sar_preview_prodrug_relationships", {"project_id": "p1", "pair_text": "secret"}, data)
+    assert result["isError"] is True
+    error = json.loads(result["content"][0]["text"])
+    assert error["error"] == "response_too_large"
+    assert "continuation" not in error
+    assert "secret" not in result["content"][0]["text"]
 
 
 def test_api_errors_are_reported_with_status_and_hint():
@@ -282,7 +425,46 @@ def test_links_encode_everything_and_only_point_at_real_pages():
     assert "password" not in url.lower() and "csrf" not in url.lower()
 
 
-def test_links_use_the_browser_address_when_one_is_configured():
+def test_endpoint_comparison_links_use_browser_ids_and_safe_fallbacks():
+    comparison = {
+        "endpoint_a": "IC50:import-v1",
+        "endpoint_b": "Solubility:import-v1",
+        "endpoint_a_metadata": {"endpoint_key": "IC50:import-v1", "canonical_unit": "pIC50", "unit_consistent": True},
+        "endpoint_b_metadata": {"endpoint_key": "Solubility:import-v1", "canonical_unit": "uM", "unit_consistent": True},
+        "rows": [], "total": 0, "returned": 0, "has_more": False, "next_offset": None,
+    }
+    server = McpServer(settings(), FakeClient({"/api/v1/endpoint-comparison": comparison}))
+    payload = json.loads(call(server, "sar_compare_endpoints", {"project_id": "p1", "endpoint_a": "IC50:import-v1", "endpoint_b": "Solubility:import-v1"})["content"][0]["text"])
+    from urllib.parse import parse_qs, urlsplit
+
+    query = parse_qs(urlsplit(payload["web_link"]).query)
+    assert query["endpoint_a"] == ["summary|IC50:import-v1|pIC50"]
+    assert query["endpoint_b"] == ["summary|Solubility:import-v1|uM"]
+
+    ambiguous = {**comparison, "endpoint_a_metadata": {"endpoint_key": "IC50:import-v1", "canonical_unit": None, "unit_consistent": False}}
+    safe_server = McpServer(settings(), FakeClient({"/api/v1/endpoint-comparison": ambiguous}))
+    safe_payload = json.loads(call(safe_server, "sar_compare_endpoints", {"project_id": "p1", "endpoint_a": "IC50:import-v1"})["content"][0]["text"])
+    safe_query = parse_qs(urlsplit(safe_payload["web_link"]).query)
+    assert "endpoint_a" not in safe_query and "IC50:import-v1" not in safe_payload["web_link"]
+
+
+def test_sectioned_export_keeps_bounded_handoff_metadata():
+    bundle = {
+        "export_id": "export_1", "created_at": "2026-10-07T12:00:00Z", "row_count": 3,
+        "provenance_policy": {"raw_measurements": "raw", "summaries_and_analyses": "derived"},
+        "compounds": [{"id": "cmp_1"}, {"id": "cmp_2"}, {"id": "cmp_3"}],
+    }
+    server = McpServer(settings(), FakeClient({"/api/v1/exports/project/p1": bundle}))
+    payload = json.loads(call(server, "sar_export_overview", {"project_id": "p1", "section": "compounds", "limit": 2})["content"][0]["text"])
+    assert payload["returned"] == 2 and payload["has_more"] is True and payload["next_offset"] == 2
+    assert payload["download_link"].endswith("/api/v1/exports/project/p1?format=csv")
+    assert payload["provenance_policy"] == bundle["provenance_policy"]
+    assert "audit" in payload["audit_side_effect"]
+    assert len(payload["rows"]) == 2 and "secret" not in json.dumps(payload).lower()
+    overview = json.loads(call(server, "sar_export_overview", {"project_id": "p1"})["content"][0]["text"])
+    assert overview["returned"] == 0 and overview["has_more"] is False and overview["next_offset"] is None
+
+
     plain = settings(SAR_MCP_BASE_URL="http://127.0.0.1:5001")
     assert plain.link_origin == "http://127.0.0.1:5001"
     shown = settings(SAR_MCP_BASE_URL="http://127.0.0.1:5001", SAR_MCP_PUBLIC_URL="https://sar.example.org/")
@@ -318,3 +500,61 @@ def test_open_in_workbench_builds_only_valid_combinations():
     assert open_link(page="admin")[0] and open_link(page="sar", run_id="../x")[0]
     failed, text = call(server, "sar_open_in_workbench", {"project_id": "prj_other", "page": "sar"})["isError"], ""
     assert failed  # a project you cannot see never gets a link
+
+
+def _body_at_size(payload, target):
+    for padding_size in range(target):
+        candidate = {**payload, "padding": "x" * padding_size}
+        body = json.dumps(candidate, separators=(",", ":")).encode("utf-8")
+        if len(body) == target:
+            return body
+    raise AssertionError("could not construct the requested JSON boundary")
+
+
+def test_upload_boundaries_cover_json_wire_decoded_and_multipart_without_batch(tmp_path):
+    decoded_limit = 5
+    wire_limit = base64_wire_bytes(decoded_limit)
+    app = create_app({
+        "TESTING": True,
+        "SAR_ENV": "test",
+        "SAR_DEMO_MODE": False,
+        "SAR_AUTH_MODE": "test-only",
+        "SECRET_KEY": "boundary-secret-that-is-long-enough",
+        "DATABASE_PATH": str(tmp_path / "boundary.db"),
+        "UPLOAD_DIR": str(tmp_path / "uploads"),
+        "MAX_UPLOAD_BYTES": decoded_limit,
+        "MAX_CONTENT_LENGTH": wire_limit,
+    })
+    client = app.test_client()
+    project_id = client.post("/api/v1/projects", json={"name": "boundary project"}).get_json()["project"]["id"]
+    exact = base64.b64encode(b"a,b\n1").decode("ascii")
+    exact_body = _body_at_size({"project_id": project_id, "filename": "x.csv", "content_base64": exact}, wire_limit)
+    exact_response = client.post("/api/v1/imports/profile", data=exact_body, content_type="application/json")
+    assert exact_response.status_code == 200
+    wire_over = client.post("/api/v1/imports/profile", data=exact_body + b"x", content_type="application/json")
+    assert wire_over.status_code == 413
+
+    decoded_over = base64.b64encode(b"a,b\n12").decode("ascii")
+    rejected = client.post("/api/v1/imports/preview", json={"project_id": project_id, "filename": "x.csv", "content_base64": decoded_over})
+    assert rejected.status_code == 413
+    import sqlite3
+    with sqlite3.connect(app.config["DATABASE_PATH"]) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM import_batches").fetchone()[0] == 0
+
+    multipart_exact = client.post("/api/v1/imports/profile", data={"file": (io.BytesIO(b"a,b\n1"), "x.csv")}, content_type="multipart/form-data")
+    multipart_over = client.post("/api/v1/imports/profile", data={"file": (io.BytesIO(b"a,b\n12"), "x.csv")}, content_type="multipart/form-data")
+    assert multipart_exact.status_code == 200 and multipart_over.status_code == 413
+
+
+def test_save_credentials_round_trips_quotes_and_backslashes(tmp_path, monkeypatch, capsys):
+    target = tmp_path / "mcp.env"
+    monkeypatch.setenv("SAR_MCP_CREDENTIALS_FILE", str(target))
+    monkeypatch.setattr("builtins.input", lambda _prompt: "chemist@example.org")
+    password = r'p\q"ssword'
+    monkeypatch.setattr(mcp_cli.getpass, "getpass", lambda _prompt: password)
+    monkeypatch.setattr(mcp_cli, "check", lambda: 0)
+    assert mcp_cli.save_credentials() == 0
+    assert target.stat().st_mode & 0o777 == 0o600
+    loaded = read_credentials_file(target)
+    assert loaded == {"SAR_MCP_EMAIL": "chemist@example.org", "SAR_MCP_PASSWORD": password}
+    assert password not in capsys.readouterr().out

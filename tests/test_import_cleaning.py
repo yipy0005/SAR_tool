@@ -112,6 +112,7 @@ def test_profile_and_preview_api_persist_cleaning_metadata(tmp_path: Path):
         }
     )
     client = app.test_client()
+    project_id = client.post("/api/v1/projects", json={"name": "Import report scope"}).get_json()["project"]["id"]
     content = _xlsx_bytes()
     profile_response = client.post(
         "/api/v1/imports/profile",
@@ -125,6 +126,7 @@ def test_profile_and_preview_api_persist_cleaning_metadata(tmp_path: Path):
         "/api/v1/imports/preview",
         data={
             "file": (io.BytesIO(content), "measurements.xlsx"),
+            "project_id": project_id,
             "sheet_name": "Data",
             "header_row": "1",
             "data_start_row": "2",
@@ -137,7 +139,11 @@ def test_profile_and_preview_api_persist_cleaning_metadata(tmp_path: Path):
     assert payload["formula_acknowledged"] is False
     assert payload["rows"][0]["source_location"]["cells"]["result"] == "D2"
 
-    report_response = client.get(f"/api/v1/imports/{payload['import_id']}")
+    missing_project = client.get(f"/api/v1/imports/{payload['import_id']}")
+    assert missing_project.status_code == 404
+    foreign_project = client.get(f"/api/v1/imports/{payload['import_id']}?project_id=prj_foreign")
+    assert foreign_project.status_code == 404
+    report_response = client.get(f"/api/v1/imports/{payload['import_id']}?project_id={project_id}")
     assert report_response.status_code == 200
     report = report_response.get_json()
     assert report["formula_policy_version"] == "formula-safe-v1"
@@ -157,6 +163,34 @@ def test_profile_and_preview_api_persist_cleaning_metadata(tmp_path: Path):
     assert batch["data_start_row"] == 2
     assert batch["cleaning_policy_version"] == "import-clean-v1"
     assert '"sheet": "Data"' in row["source_location_json"]
+
+
+def test_json_profile_requires_project_scope_before_upload_processing(tmp_path):
+    app = create_app(
+        {
+            "TESTING": True,
+            "SAR_ENV": "test",
+            "SAR_DEMO_MODE": False,
+            "SAR_AUTH_MODE": "test-only",
+            "SECRET_KEY": "test-secret-that-is-long-enough-for-profile-scope",
+            "DATABASE_PATH": str(tmp_path / "profile-scope.db"),
+            "UPLOAD_DIR": str(tmp_path / "uploads"),
+        }
+    )
+    client = app.test_client()
+    missing = client.post(
+        "/api/v1/imports/profile",
+        json={"filename": "measurements.csv", "content_base64": "not-valid-base64"},
+    )
+    assert missing.status_code == 422
+    assert missing.get_json()["error"] == "project_required"
+    foreign = client.post(
+        "/api/v1/imports/profile",
+        json={"project_id": "prj_foreign", "filename": "measurements.csv", "content_base64": "not-valid-base64"},
+    )
+    assert foreign.status_code == 403
+    assert foreign.get_json()["error"] == "project_forbidden"
+
 
 
 def test_duplicate_required_headers_are_blocked_until_explicit_mapping():

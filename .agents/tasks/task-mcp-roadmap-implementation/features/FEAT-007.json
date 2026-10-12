@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-007",
+  "type": "test",
+  "description": "Add broad authenticated integration/native smoke coverage, including the real CellLinePanel_pIC50s.xlsx journey and the retained governance boundary.",
+  "status": "pending",
+  "steps": [
+    "Extend production-mode MCP integration for all remaining analysis paths, recommendation generation/readback, prediction train/apply/readback, roles, session renewal, CSRF, allowlists, import formats, endpoint comparison, prodrug chain, export, and project isolation.",
+    "Add a deterministic native smoke test using test/CellLinePanel_pIC50s.xlsx: assert both visible sheets, select Aggregated_Data/header 1/data 2, map Sample_ID and SMILES explicitly, verify the six wide pIC50 endpoint columns and source cells, retrieve all expanded staged pages (168 rows), commit to a temporary project, build summaries, and compare only explicit Sample_ID ester-to-acid mappings; do not use WuXi_ID_core or infer pairs from structures.",
+    "Keep tests proving MCP cannot approve/reject recommendations, write hypotheses/claims/designs/series memberships, or modify project membership/roles; document native fallback limits rather than claiming browser clicks."
+  ],
+  "acceptance_criteria": [
+    "The real workbook passes profile/select/preview/page/commit/summary/explicit-pair-compare without structure inference.",
+    "Remaining analysis, role, authentication, project-scope, export, and governance paths have representative production-mode integration assertions.",
+    "Native smoke covers route/static/deep-link behavior while clearly distinguishing unverified real-browser/Kiro UI behavior."
+  ],
+  "verification": ["pixi run python -m pytest -q tests/test_mcp_integration.py tests/test_mcp_native_smoke.py tests/test_prodrug_relationships.py tests/test_import_cleaning.py tests/test_production_analysis_api.py tests/test_production_dashboard.py tests/test_export_api.py"],
+  "blocked_reason": null,
+  "findings": "Resolves review finding 11 and implements AC-002, AC-005, AC-006, AC-008 through AC-014, AC-018 through AC-026, and AC-029."
+}

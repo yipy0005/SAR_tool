@@ -81,15 +81,21 @@ def list_records(ctx: Context, args: dict) -> dict:
 
 
 ANALYSIS_PATHS = {
-    "mmp": "mmp", "pharmacophore_rgroup": "pharmacophore-rgroup", "selectivity": "selectivity", "properties": "properties",
-    "cellular_translation": "cellular-translation", "adme": "adme", "pareto": "pareto", "contradictions": "contradictions",
+    "mmp": "mmp", "rgroup": "rgroup", "pharmacophore_rgroup": "pharmacophore-rgroup", "activity_cliffs": "activity-cliffs",
+    "selectivity": "selectivity", "properties": "properties", "cellular_translation": "cellular-translation", "adme": "adme", "pareto": "pareto", "contradictions": "contradictions",
     "information_gain": "information-gain",
 }
 
 
 def get_analysis_run(ctx: Context, args: dict) -> dict:
-    run = ctx.client.get(f"/api/v1/analysis/{ANALYSIS_PATHS[args['analysis']]}/{seg(args['run_id'])}")
+    path = f"/api/v1/analysis/{ANALYSIS_PATHS[args['analysis']]}/{seg(args['run_id'])}"
+    query = {}
+    if args["analysis"] in {"rgroup", "activity_cliffs"}:
+        query = {"project_id": args["project_id"], "offset": args.get("offset", 0), "limit": args.get("limit", 200)}
+    run = ctx.client.get(path, **query)
     owner = run.get("project_id") if isinstance(run, dict) else None
+    if owner and owner != args["project_id"]:
+        raise ToolError("That run is not available in the requested project.")
     # Fail closed: with an allowlist, a run whose project cannot be confirmed is not shown.
     if ctx.settings.project_ids and owner not in ctx.settings.project_ids:
         raise ToolError("That run belongs to a project this server is not allowed to use (SAR_MCP_PROJECT_IDS).")
@@ -136,6 +142,6 @@ TOOLS = [
     Tool("sar_get_analysis_run", "Get a stored analysis run",
          "Read a stored analysis run by id (ids come from sar_run_analysis or the project export). Runs of these types can be read back: " + ", ".join(sorted(ANALYSIS_PATHS)) + ".",
          get_analysis_run,
-         {"analysis": {"type": "string", "enum": sorted(ANALYSIS_PATHS)}, "run_id": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"}},
-         ("analysis", "run_id")),
+         {"analysis": {"type": "string", "enum": sorted(ANALYSIS_PATHS)}, "run_id": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"}, **_P, "offset": {"type": "integer", "minimum": 0, "maximum": 1000000}, "limit": limit_property(200, 500)},
+         ("project_id", "analysis", "run_id")),
 ]

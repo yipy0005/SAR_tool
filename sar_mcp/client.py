@@ -13,6 +13,14 @@ from typing import Any
 from . import __version__
 from .config import Settings
 
+DEFAULT_MAX_UPLOAD_BYTES = 5_000_000
+JSON_ENVELOPE_BYTES = 65_536
+
+
+def _json_wire_limit(decoded_bytes: int) -> int:
+    return 4 * ((decoded_bytes + 2) // 3) + JSON_ENVELOPE_BYTES
+
+
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_LOGIN_FAILURES = 3
 _CSRF_PATTERNS = (
@@ -84,7 +92,10 @@ class SarClient:
         headers = {"Accept": "application/json, text/html;q=0.5", "User-Agent": f"sar-mcp/{__version__}"}
         data = None
         if body is not None:
-            data = json.dumps(body).encode("utf-8")
+            data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            limit = self.settings.json_request_bytes or _json_wire_limit(self.settings.max_upload_bytes)
+            if len(data) > limit:
+                raise SarApiError(413, "json_request_too_large", "The serialized JSON request exceeds the configured wire limit.")
             headers["Content-Type"] = "application/json"
         elif form is not None:
             data = urllib.parse.urlencode(form).encode("utf-8")

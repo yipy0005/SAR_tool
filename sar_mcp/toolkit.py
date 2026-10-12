@@ -36,6 +36,7 @@ class Tool:
     required: tuple = ()
     tier: str = "read"
     idempotent: bool = True
+    side_effect: str = "none"
 
     def available_in(self, mode: str) -> bool:
         return mode in TIERS[self.tier]
@@ -47,6 +48,7 @@ class Tool:
         return schema
 
     def descriptor(self) -> dict:
+        pure_read = self.tier == "read" and self.side_effect == "none"
         return {
             "name": self.name,
             "title": self.title,
@@ -54,11 +56,12 @@ class Tool:
             "inputSchema": self.input_schema(),
             "annotations": {
                 "title": self.title,
-                "readOnlyHint": self.tier == "read",
-                "destructiveHint": False,  # nothing here deletes or overwrites; writes only add records
-                "idempotentHint": self.idempotent and self.tier == "read",
+                "readOnlyHint": pure_read,
+                "destructiveHint": False,
+                "idempotentHint": self.idempotent and pure_read,
                 "openWorldHint": False,
             },
+            "_meta": {"sar.workbench": {"side_effect": self.side_effect}},
         }
 
 

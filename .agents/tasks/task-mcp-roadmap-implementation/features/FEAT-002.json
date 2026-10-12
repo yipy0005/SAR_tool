@@ -1,0 +1,21 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Expose safe profile, XLSX/CSV/TSV staged preview, paginated staged readback, and confirmed project-bound import commit through MCP.",
+  "status": "pending",
+  "steps": [
+    "Add sar_import_profile and extend sar_import_preview for strict base64/XLSX and CSV/TSV inputs, sheet/header/data-start selection, mapping overrides, formula acknowledgement, profile metadata, source-cell locations, and quarantine origin.",
+    "Add sar_get_import_preview with mandatory project binding and stable row ordering shared by retrieval and commit; enforce owner/project access before row disclosure and return total/offset/returned/has_more/next_offset.",
+    "Require exact commit confirmation plus reviewed_all_rows and reviewed_row_count matching the current staged total; preserve transactional import validation, safe upload errors, formula policy, and quarantine-to-imported origin transitions.",
+    "Add staged-review links and focused unit/domain/MCP integration coverage, including exact size, unsafe workbook, missing/foreign/mismatch import, tied source-row ordering, and truncation behavior."
+  ],
+  "acceptance_criteria": [
+    "The real import profile and preview contract supports CSV, TSV, and XLSX without evaluating formulas or accepting macros/unsafe workbooks.",
+    "Every staged row/source location is retrievable over bounded pages with stable order and explicit continuation metadata.",
+    "Commit cannot proceed without exact confirmation and a matching complete-review attestation, and foreign projects cannot read or commit the batch.",
+    "Rejected transport/file boundaries do not create import batches."
+  ],
+  "verification": ["pixi run python -m pytest -q tests/test_import_cleaning.py tests/test_mcp_unit.py tests/test_mcp_integration.py tests/test_deep_links.py"],
+  "blocked_reason": null,
+  "findings": "Implements AC-007 through AC-012 and the project-bound/stable-order parts of the reviewed import design."
+}
