@@ -155,3 +155,7 @@ def test_staged_and_exact_evidence_links_open_project_scoped_context(app):
     static_source = (Path(__file__).parents[1] / "static" / "production_sar.js").read_text(encoding="utf-8")
     for marker in ("restoreRequestedState", "comparison_run_id", "relationship_id", "not-found", "const selectedMode =", "form.addEventListener(\"submit\""):
         assert marker in static_source
+    assert static_source.index('form.addEventListener("submit"') < static_source.index("form.querySelectorAll('input[name=\"mode\"]')")
+    submit_body = static_source[static_source.index('form.addEventListener("submit"'):]
+    assert 'mode === "prodrug"' in submit_body
+    assert 'fetch("/api/v1/sar/discover"' in submit_body

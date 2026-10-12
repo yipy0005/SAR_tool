@@ -24,3 +24,12 @@
 - The SAR page is rendered by `templates/production_sar.html`, loaded with `static/production_sar.js` from `templates/production_workspace_base.html`; the backend route is `/workspace/<view>` in `app.py`, with `/api/v1/sar/discover` for the two discovery modes and `/api/v1/analysis/prodrug-comparison` for prodrug comparisons.
 - The backend already has the expected prodrug comparison implementation and targeted API tests in `tests/test_prodrug_relationships.py`; imported project data and relationship records must not be modified.
 - No browser automation dependency is present in the locked Pixi environment. The plan therefore requires a manual browser smoke test rather than introducing a new package.
+
+## Review iteration evidence (2026-10-12)
+
+- Root cause addressed: SAR initialization called `syncMode()` before installing the form submit listener. Mode-dependent initialization could fail before the listener existed, leaving the button as a no-op. The submit listener is now registered first; existing `selectedMode()` dispatch remains unchanged (`prodrug` uses the comparison flow, while `discover` and `selected` use `/api/v1/sar/discover`).
+- `pixi run test tests/test_deep_links.py tests/test_prodrug_relationships.py tests/test_production_dashboard.py` — 17 passed in 4.24s.
+- `pixi run test` — 224 passed in 32.07s.
+- `node --check static/production_sar.js` — passed.
+- `git diff --check` — passed.
+- Runtime reachability: `curl -I http://127.0.0.1:5001/` returned HTTP 302 to `/login`; the project SAR URL also returned HTTP 302 to `/login`. No browser automation or authenticated credentials are available in this session, so the authenticated click/request/visible-results smoke test could not be completed. No imported project data or relationship records were modified.

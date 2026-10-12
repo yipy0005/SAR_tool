@@ -388,10 +388,6 @@
     reader.readAsText(file);
   });
 
-  form.querySelectorAll('input[name="mode"]').forEach((input) => input.addEventListener("change", syncMode));
-  syncMode();
-  restoreRequestedState();
-
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const endpointKey = endpoint?.value || "";
@@ -432,6 +428,10 @@
       if (runButton) runButton.disabled = false;
     }
   });
+
+  form.querySelectorAll('input[name="mode"]').forEach((input) => input.addEventListener("change", syncMode));
+  syncMode();
+  restoreRequestedState();
 
   // Find by structure (static/structure_search.js) can make a hit the SAR reference, here or
   // from another page via ?reference=<compound id>. Same behaviour as the row button: rerun at once.
