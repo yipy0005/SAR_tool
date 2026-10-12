@@ -33,3 +33,12 @@
 - `node --check static/production_sar.js` — passed.
 - `git diff --check` — passed.
 - Runtime reachability: `curl -I http://127.0.0.1:5001/` returned HTTP 302 to `/login`; the project SAR URL also returned HTTP 302 to `/login`. No browser automation or authenticated credentials are available in this session, so the authenticated click/request/visible-results smoke test could not be completed. No imported project data or relationship records were modified.
+
+## Review iteration evidence (2026-10-12, authenticated runtime)
+
+- Authenticated session: generated a signed local session for the configured local identity using the existing production secret; no credentials or session values were committed or recorded.
+- `curl -sS -H "Cookie: session=<authenticated session>" http://127.0.0.1:5001/api/v1/projects` — HTTP 200; Scratch Project `prj_988418bb6f0248cfa3dfa8635406835c` was accessible.
+- `curl -sS -H "Cookie: session=<authenticated session>" "http://127.0.0.1:5001/workspace/sar?project_id=prj_988418bb6f0248cfa3dfa8635406835c"` — HTTP 200; endpoint option `CHLA90:import-v1` rendered as `CHLA90 · pIC50 · 28 compounds`, and the initial status was `Choose an endpoint to begin.`.
+- Authenticated UI-equivalent POST smoke against `http://127.0.0.1:5001`: Compare prodrug–active pairs called `/api/v1/analysis/prodrug-comparison` with `persist: false` and `CHLA90:import-v1` — HTTP 201, `pair_count=11`, `complete_count=11`; the rendered result heading would be `CHLA90 across 11 linked pairs` rather than the initial prompt.
+- Authenticated UI-equivalent POST smoke against `/api/v1/sar/discover`: Discover all series — HTTP 201, `mode=discover`, `series=8`; Selected SAR reference using `cmp_87a7b37ea24346d081d0393849295b97` — HTTP 201, `mode=selected`, `series=1`.
+- No browser executable or browser automation harness is available in the locked Pixi environment; therefore the authenticated browser click/console capture remains unavailable. The authenticated page and exact fetch payloads were verified against the running app, and no imported project data or relationship records were modified.
